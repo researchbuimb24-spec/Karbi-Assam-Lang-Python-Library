@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "karbi"
+version = "0.1.0"
+description = "A Python library and cultural knowledge resource for the Karbi language"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    {name = "Karbi Language Project Contributors"}
+]
+keywords = [
+    "karbi",
+    "karbi-language",
+    "linguistics",
+    "dictionary",
+    "assam",
+    "indigenous-languages"
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Linguistic",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
