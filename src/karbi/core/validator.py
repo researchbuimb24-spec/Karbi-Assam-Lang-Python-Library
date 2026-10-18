@@ -178,15 +178,32 @@ class LexiconValidator:
         # 7. Cross-References Check (if enabled)
         if check_cross_refs:
             for xref in e.cross_references:
-                if xref.target_entry_id not in self.seen_entry_ids:
+                target = (xref.target_entry_id or "").strip()
+                if not target:
                     errors.append(
-                        f"Entry '{e.id}': cross-reference target '{xref.target_entry_id}' does not exist in dataset."
+                        f"Entry '{e.id}': cross-reference target ID cannot be empty or missing."
+                    )
+                elif target not in self.seen_entry_ids:
+                    errors.append(
+                        f"Entry '{e.id}': cross-reference target '{target}' does not exist in dataset."
                     )
 
-        # 8. Strict Verification Requirements (for VERIFIED status)
+        # 8. Provenance Evidence Records Validation (across all statuses)
+        if e.provenance and e.provenance.evidence_records:
+            for ev in e.provenance.evidence_records:
+                if not ev.source_id or not ev.source_id.strip():
+                    errors.append(f"Entry '{e.id}': evidence record missing 'source_id'.")
+                elif ev.source_id not in self.sources_registry:
+                    errors.append(
+                        f"Entry '{e.id}': evidence record references unregistered source_id '{ev.source_id}'."
+                    )
+
+        # 9. Strict Verification Requirements (for VERIFIED status)
         if e.status == Status.VERIFIED.value:
             verification_errors = self._validate_verification_evidence(e)
-            errors.extend(verification_errors)
+            for ve in verification_errors:
+                if ve not in errors:
+                    errors.append(ve)
 
         return errors
 
@@ -449,15 +466,32 @@ class LexiconValidator:
             )
             for v in data.get("spelling_variants", [])
         ]
-        xrefs = [
-            CrossReference(
-                # JSONL may use entry_id/relationship; legacy uses target_entry_id/relation_type
-                target_entry_id=xr.get("target_entry_id") or xr.get("entry_id", ""),
-                relation_type=xr.get("relation_type") or xr.get("relationship", "see_also"),
-                notes=xr.get("notes"),
+        xrefs = []
+        for xr in data.get("cross_references", []):
+            if isinstance(xr, CrossReference):
+                xrefs.append(xr)
+                continue
+            if not isinstance(xr, dict):
+                continue
+            # Support both notes and note, preferring the populated value
+            note_val = None
+            if xr.get("notes") is not None and str(xr.get("notes")).strip():
+                note_val = str(xr.get("notes"))
+            elif xr.get("note") is not None and str(xr.get("note")).strip():
+                note_val = str(xr.get("note"))
+            elif xr.get("notes") is not None:
+                note_val = str(xr.get("notes"))
+            elif xr.get("note") is not None:
+                note_val = str(xr.get("note"))
+
+            xrefs.append(
+                CrossReference(
+                    # JSONL may use entry_id/relationship; legacy uses target_entry_id/relation_type
+                    target_entry_id=xr.get("target_entry_id") or xr.get("entry_id", ""),
+                    relation_type=xr.get("relation_type") or xr.get("relationship", "see_also"),
+                    notes=note_val,
+                )
             )
-            for xr in data.get("cross_references", [])
-        ]
 
         return LexiconEntry(
             id=data.get("id", ""),

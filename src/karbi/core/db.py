@@ -8,6 +8,7 @@ with Full-Text Search (FTS5) and reverse Multilingual-to-Karbi indexing.
 
 from __future__ import annotations
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +16,47 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from karbi.core.loader import load_jsonl_file
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent.parent / "karbi.db"
+
+def get_user_data_dir() -> Path:
+    """Returns an OS-appropriate writable directory for karbi runtime data/cache."""
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if base:
+            return Path(base) / "karbi"
+        return Path.home() / ".karbi"
+    else:
+        xdg_data = os.environ.get("XDG_DATA_HOME")
+        if xdg_data:
+            return Path(xdg_data) / "karbi"
+        xdg_cache = os.environ.get("XDG_CACHE_HOME")
+        if xdg_cache:
+            return Path(xdg_cache) / "karbi"
+        return Path.home() / ".local" / "share" / "karbi"
+
+
+def get_default_db_path() -> Path:
+    """
+    Returns the default path to the SQLite database.
+
+    Resolution order:
+    1. KARBI_DB_PATH environment variable (if set).
+    2. Source repository root karbi.db if running from a source checkout
+       (where pyproject.toml and data/ exist at the repository root).
+    3. Standalone / installed package: karbi.db in the writable user data directory.
+    """
+    env_override = os.environ.get("KARBI_DB_PATH")
+    if env_override:
+        return Path(env_override)
+
+    # Detect source-tree checkout
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
+    if (repo_root / "pyproject.toml").is_file() and (repo_root / "data" / "lexicon").is_dir():
+        return repo_root / "karbi.db"
+
+    return get_user_data_dir() / "karbi.db"
+
+
+DEFAULT_DB_PATH = get_default_db_path()
 
 
 @dataclass
@@ -32,11 +73,14 @@ class SearchResult:
     phonetic_ipa: Optional[str] = None
 
 
-def get_db_connection(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    """Returns a connection to the SQLite database with row factory enabled."""
-    conn = sqlite3.connect(str(db_path))
+def get_db_connection(db_path: Optional[Union[str, Path]] = None) -> sqlite3.Connection:
+    """Returns a connection to the SQLite database with row factory and foreign keys enabled."""
+    target = db_path if db_path is not None else get_default_db_path()
+    conn = sqlite3.connect(str(target))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
+
 
 
 def init_db_schema(conn: sqlite3.Connection) -> None:
@@ -127,7 +171,7 @@ def init_db_schema(conn: sqlite3.Connection) -> None:
 def compile_database(
     lexicon_paths: List[Union[str, Path]],
     source_paths: List[Union[str, Path]],
-    db_path: Union[str, Path] = DEFAULT_DB_PATH,
+    db_path: Optional[Union[str, Path]] = None,
 ) -> Tuple[int, int]:
     """
     Compiles raw JSONL source files and lexicon files into the SQLite database.
@@ -135,10 +179,11 @@ def compile_database(
     Returns:
         (entries_inserted_count, sources_inserted_count)
     """
-    db_p = Path(db_path)
+    db_p = Path(db_path) if db_path is not None else get_default_db_path()
     if db_p.exists():
         db_p.unlink()
 
+    db_p.parent.mkdir(parents=True, exist_ok=True)
     conn = get_db_connection(db_p)
     init_db_schema(conn)
     cur = conn.cursor()

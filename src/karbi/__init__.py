@@ -24,6 +24,16 @@ from karbi.culture import (
     get_deities,
     get_rituals,
 )
+from karbi.api import (
+    DatasetValidationResult,
+    SearchResult,
+    batch_lookup,
+    batch_search,
+    batch_translate,
+    search,
+    validate_dataset,
+)
+from karbi.cli import main as cli_main
 from karbi.dictionary import DictionaryEntry, lookup
 from karbi.grammar import (
     count_with_classifier,
@@ -41,6 +51,15 @@ __version__ = "0.1.0"
 
 __all__ = [
     "__version__",
+    "cli_main",
+    # High-Level Unified Python API
+    "search",
+    "batch_search",
+    "batch_lookup",
+    "batch_translate",
+    "validate_dataset",
+    "DatasetValidationResult",
+    "SearchResult",
     # Multilingual-to-Karbi Translation
     "translate",
     "get_supported_languages",

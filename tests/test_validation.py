@@ -307,6 +307,176 @@ class TestValidationSystem(unittest.TestCase):
         self.assertTrue(any("headword.lemma cannot be empty" in e for e in errors))
         self.assertTrue(any("definitions cannot be empty" in e for e in errors))
 
+    def test_cross_reference_note_preservation(self):
+        """Cross-reference notes survive dictionary coercion and validation."""
+        # 1. JSONL format with singular 'note'
+        dict_jsonl = {
+            "id": "KB-TEST-0000010",
+            "headword": {"lemma": "test", "script": "latin"},
+            "dialect": {"primary_variety": "rongkhang"},
+            "senses": [{"sense_id": "S1", "part_of_speech": "noun", "definitions": {"en": ["test"]}}],
+            "cross_references": [
+                {"entry_id": "KB-TEST-0000001", "relationship": "component_word", "note": "JSONL singular note"}
+            ],
+            "status": Status.DRAFT.value,
+        }
+        coerced_jsonl = self.validator._coerce_entry(dict_jsonl)
+        self.assertEqual(len(coerced_jsonl.cross_references), 1)
+        self.assertEqual(coerced_jsonl.cross_references[0].notes, "JSONL singular note")
+        self.assertEqual(coerced_jsonl.cross_references[0].target_entry_id, "KB-TEST-0000001")
+        self.assertEqual(coerced_jsonl.cross_references[0].relation_type, "component_word")
+
+        # 2. Legacy model format with plural 'notes'
+        dict_legacy = {
+            "id": "KB-TEST-0000011",
+            "headword": {"lemma": "test2", "script": "latin"},
+            "dialect": {"primary_variety": "rongkhang"},
+            "senses": [{"sense_id": "S1", "part_of_speech": "noun", "definitions": {"en": ["test"]}}],
+            "cross_references": [
+                {"target_entry_id": "KB-TEST-0000001", "relation_type": "see_also", "notes": "Legacy plural notes"}
+            ],
+            "status": Status.DRAFT.value,
+        }
+        coerced_legacy = self.validator._coerce_entry(dict_legacy)
+        self.assertEqual(coerced_legacy.cross_references[0].notes, "Legacy plural notes")
+
+        # 3. Both present: prefers populated value
+        dict_both = {
+            "id": "KB-TEST-0000012",
+            "headword": {"lemma": "test3", "script": "latin"},
+            "dialect": {"primary_variety": "rongkhang"},
+            "senses": [{"sense_id": "S1", "part_of_speech": "noun", "definitions": {"en": ["test"]}}],
+            "cross_references": [
+                {"entry_id": "KB-TEST-0000001", "notes": "Populated notes", "note": "   "}
+            ],
+            "status": Status.DRAFT.value,
+        }
+        coerced_both = self.validator._coerce_entry(dict_both)
+        self.assertEqual(coerced_both.cross_references[0].notes, "Populated notes")
+
+    def test_unregistered_evidence_source_rejected_for_source_attested_entry(self):
+        """Regression test: An unregistered evidence source is rejected for SOURCE_ATTESTED entries."""
+        entry = get_fictional_entry_fixture(
+            entry_id="KB-TEST-0000020",
+            status=Status.SOURCE_ATTESTED.value,
+            sense_status=Status.SOURCE_ATTESTED.value,
+        )
+        # Point evidence record to an unregistered source
+        entry.provenance.evidence_records = [
+            EvidenceRecord(
+                source_id="SRC-PUB-UNREGISTERED-999",
+                locator="p. 42",
+                evidence_type="published_print_citation",
+            )
+        ]
+        # Ensure example source does not mask the check
+        entry.senses[0].examples = []
+
+        errors = self.validator.validate_entry(entry)
+        self.assertTrue(
+            any("references unregistered source_id 'SRC-PUB-UNREGISTERED-999'" in e for e in errors),
+            f"Expected unregistered source error on SOURCE_ATTESTED entry, got: {errors}",
+        )
+
+    def test_unregistered_evidence_source_rejected_for_draft_entry(self):
+        """Regression test: An unregistered evidence source is rejected for DRAFT entries."""
+        entry = get_fictional_entry_fixture(
+            entry_id="KB-TEST-0000021",
+            status=Status.DRAFT.value,
+            sense_status=Status.DRAFT.value,
+        )
+        entry.provenance.evidence_records = [
+            EvidenceRecord(
+                source_id="SRC-PUB-UNREGISTERED-888",
+                locator="p. 10",
+                evidence_type="published_print_citation",
+            )
+        ]
+        entry.senses[0].examples = []
+
+        errors = self.validator.validate_entry(entry)
+        self.assertTrue(
+            any("references unregistered source_id 'SRC-PUB-UNREGISTERED-888'" in e for e in errors),
+            f"Expected unregistered source error on DRAFT entry, got: {errors}",
+        )
+
+    def test_registered_evidence_source_valid_for_attested_entry(self):
+        """Regression test: A registered evidence source remains valid when the rest of the entry is valid."""
+        entry = get_fictional_entry_fixture(
+            entry_id="KB-TEST-0000022",
+            status=Status.SOURCE_ATTESTED.value,
+            sense_status=Status.SOURCE_ATTESTED.value,
+        )
+        # Uses registered source fixture SRC-PUB-00001
+        entry.provenance.evidence_records = [
+            EvidenceRecord(
+                source_id=self.source_fixture.source_id,
+                locator="p. 100",
+                evidence_type="published_print_citation",
+            )
+        ]
+        errors = self.validator.validate_entry(entry)
+        self.assertEqual(errors, [])
+
+    def test_verified_entry_safeguards_continue_to_enforce_reviewer_and_evidence(self):
+        """Regression test: Existing VERIFIED-entry safeguards continue to work."""
+        # 1. VERIFIED entry without reviewer registry must fail closed
+        entry_fail_closed = get_fictional_entry_fixture(
+            entry_id="KB-TEST-0000023",
+            status=Status.VERIFIED.value,
+            sense_status=Status.VERIFIED.value,
+            is_test_fixture=False,
+        )
+        errors = self.validator.validate_entry(entry_fail_closed)
+        self.assertTrue(
+            any("verification check FAILED CLOSED" in e for e in errors),
+            f"Expected fail-closed error, got: {errors}",
+        )
+
+        # 2. VERIFIED entry with reviewer registry but unregistered evidence source
+        authorized_reviewer = ReviewerRegistration(
+            reviewer_id="REV-LEAD-01",
+            role=ReviewerRole.LINGUIST.value,
+            authorized_scopes=["headword_orthography", "definitions_en", "source_locator_match"],
+            is_active=True,
+        )
+        validator_with_registry = LexiconValidator(
+            sources_registry={self.source_fixture.source_id: self.source_fixture},
+            reviewer_registry={"REV-LEAD-01": authorized_reviewer},
+        )
+        entry_with_bad_source = get_fictional_entry_fixture(
+            entry_id="KB-LEX-0000024",
+            status=Status.VERIFIED.value,
+            sense_status=Status.VERIFIED.value,
+            is_test_fixture=False,
+        )
+        entry_with_bad_source.provenance.evidence_records = [
+            EvidenceRecord(
+                source_id="SRC-PUB-UNREGISTERED-777",
+                locator="p. 50",
+                evidence_type="published_print_citation",
+            )
+        ]
+        entry_with_bad_source.provenance.reviews = [
+            ReviewAuditRecord(
+                review_id="REV-2026-0099",
+                reviewer_id="REV-LEAD-01",
+                reviewer_role=ReviewerRole.LINGUIST.value,
+                date_reviewed="2026-10-17T00:00:00Z",
+                scope_reviewed=["headword_orthography", "definitions_en", "source_locator_match"],
+                verification_finding="confirmed_accurate",
+                audit_notes="Audit note",
+            )
+        ]
+        errors_verified = validator_with_registry.validate_entry(entry_with_bad_source)
+        self.assertTrue(
+            any("references unregistered source_id 'SRC-PUB-UNREGISTERED-777'" in e for e in errors_verified),
+            f"Expected unregistered source error, got: {errors_verified}",
+        )
+        # Ensure no duplicated error strings
+        unreg_errors = [e for e in errors_verified if "SRC-PUB-UNREGISTERED-777" in e]
+        self.assertEqual(len(unreg_errors), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

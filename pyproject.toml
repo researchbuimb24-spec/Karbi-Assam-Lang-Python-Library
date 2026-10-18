@@ -29,6 +29,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Processing :: Linguistic",
 ]
@@ -39,5 +40,18 @@ dev = [
     "pytest>=7.0",
 ]
 
+[project.scripts]
+karbi = "karbi.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"karbi.resources" = ["*/*.jsonl", "**/*.jsonl", "*.jsonl"]
+"karbi" = ["resources/*/*.jsonl", "resources/**/*.jsonl", "resources/*.jsonl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+

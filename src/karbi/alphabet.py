@@ -7,7 +7,7 @@ and phonological inventory, based on standardized conventions and
 linguistic documentation from Lyall & Stack (1908) and Grierson (1903).
 """
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 VOWELS = {
     "a": {"name": "long a", "example": "father", "ipa": "/aː/"},

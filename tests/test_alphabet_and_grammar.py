@@ -87,6 +87,12 @@ class TestAlphabetAndGrammar(unittest.TestCase):
         hemphu = next(d for d in deities if d["name"] == "Hemphu")
         self.assertEqual(hemphu["title"], "Household and Clan Guardian Deity")
 
+    def test_alphabet_type_hints(self):
+        """Type annotations in alphabet module evaluate without NameError."""
+        import typing
+        hints = typing.get_type_hints(karbi.alphabet.get_phonology_summary)
+        self.assertIn("return", hints)
+
 
 if __name__ == "__main__":
     unittest.main()

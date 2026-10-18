@@ -51,6 +51,11 @@ class DatasetValidationResult:
     lexicon_entries_count: int = 0
     sources_count: int = 0
     files_scanned: List[str] = field(default_factory=list)
+    status_counts: Dict[str, int] = field(default_factory=dict)
+    missing_citation_entries: List[str] = field(default_factory=list)
+    ai_candidate_entries: List[str] = field(default_factory=list)
+    unverified_glosses_count: int = 0
+    unverified_glosses_by_lang: Dict[str, int] = field(default_factory=dict)
 
     def summary(self) -> str:
         status_text = "PASSED" if self.is_valid else "FAILED"
@@ -59,6 +64,73 @@ class DatasetValidationResult:
             f"{self.lexicon_entries_count} entries, {self.sources_count} sources "
             f"across {len(self.files_scanned)} files. Errors: {len(self.errors)}."
         )
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "is_valid": self.is_valid,
+            "errors": [
+                {
+                    "message": e.message,
+                    "file_path": e.file_path,
+                    "line_number": e.line_number,
+                    "record_id": e.record_id,
+                }
+                for e in self.errors
+            ],
+            "lexicon_entries_count": self.lexicon_entries_count,
+            "sources_count": self.sources_count,
+            "files_scanned": self.files_scanned,
+            "status_counts": self.status_counts,
+            "missing_citation_entries": self.missing_citation_entries,
+            "ai_candidate_entries": self.ai_candidate_entries,
+            "unverified_glosses_count": self.unverified_glosses_count,
+            "unverified_glosses_by_lang": self.unverified_glosses_by_lang,
+        }
+
+    def report(self, verbose: bool = False) -> str:
+        lines = [
+            "=" * 70,
+            "KARBI DATASET VALIDATION & CONTRIBUTOR AUDIT REPORT",
+            "=" * 70,
+            f"Overall Status:        {'PASSED [VALID]' if self.is_valid else 'FAILED [INVALID]'} (Errors: {len(self.errors)})",
+            f"Files Scanned:         {len(self.files_scanned)}",
+            f"Sources Registered:    {self.sources_count}",
+            f"Lexicon Entries:       {self.lexicon_entries_count}",
+            "",
+            "Lifecycle Status Breakdown:",
+        ]
+        for st, count in sorted(self.status_counts.items()):
+            lines.append(f"  • {st:<22}: {count:>5} entries")
+
+        lines.append("")
+        lines.append("Evidence & Citations:")
+        cited_count = self.lexicon_entries_count - len(self.missing_citation_entries)
+        pct = (cited_count / self.lexicon_entries_count * 100) if self.lexicon_entries_count > 0 else 0
+        lines.append(f"  • Entries with citations:     {cited_count:>5} / {self.lexicon_entries_count} ({pct:.1f}%)")
+        lines.append(f"  • Entries missing citations:  {len(self.missing_citation_entries):>5}")
+        if self.missing_citation_entries and verbose:
+            lines.append(f"    Missing IDs: {', '.join(self.missing_citation_entries[:10])}")
+
+        lines.append("")
+        lines.append("Translation Verification Audit:")
+        lines.append(f"  • Total Unverified Glosses:   {self.unverified_glosses_count:>5}")
+        for l_code, count in sorted(self.unverified_glosses_by_lang.items()):
+            lines.append(f"    - Language '{l_code}':       {count:>5} unverified glosses")
+
+        if self.ai_candidate_entries:
+            lines.append("")
+            lines.append(f"AI Candidate Entries ({len(self.ai_candidate_entries)}):")
+            lines.append(f"  [!] Identified AI candidate entries: {', '.join(self.ai_candidate_entries)}")
+            lines.append("  [!] Note: AI candidate entries must remain explicitly unverified until reviewed.")
+
+        if self.errors:
+            lines.append("")
+            lines.append(f"Validation Errors ({len(self.errors)}):")
+            for idx, err in enumerate(self.errors, start=1):
+                lines.append(f"  [{idx}] {err}")
+
+        lines.append("=" * 70)
+        return "\n".join(lines)
 
 
 class DatasetValidator:
@@ -189,6 +261,45 @@ class DatasetValidator:
             reviewer_registry=self.reviewer_registry,
         )
 
+        status_counts: Dict[str, int] = {}
+        missing_citation_entries: List[str] = []
+        ai_candidate_entries: List[str] = []
+        unverified_glosses_by_lang: Dict[str, int] = {}
+        unverified_glosses_count = 0
+
+        for rec in lexicon_records:
+            entry_data = rec.data
+            entry_id = entry_data.get("id") or ""
+            status = entry_data.get("status", "DRAFT")
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+            if status == "AI_CANDIDATE":
+                ai_candidate_entries.append(entry_id)
+
+            prov = entry_data.get("provenance", {})
+            evidence = prov.get("evidence_records", []) if isinstance(prov, dict) else []
+            if not evidence:
+                missing_citation_entries.append(entry_id)
+
+            # Audit definition glosses for verification status
+            for sense in entry_data.get("senses", []):
+                if isinstance(sense, dict):
+                    defs = sense.get("definitions", {})
+                    gloss_prov = sense.get("gloss_provenance", {}) or {}
+                    for lang_code, items in defs.items():
+                        prov_label = str(gloss_prov.get(lang_code, "")).lower()
+                        if isinstance(items, list):
+                            for item in items:
+                                is_ver = False
+                                if isinstance(item, dict):
+                                    is_ver = item.get("verified", False) is True
+                                elif isinstance(item, str):
+                                    is_ver = prov_label in ("source_attested", "verified", "peer_reviewed")
+                                if not is_ver:
+                                    unverified_glosses_count += 1
+                                    unverified_glosses_by_lang[lang_code] = unverified_glosses_by_lang.get(lang_code, 0) + 1
+
+
         for rec in lexicon_records:
             entry_data = rec.data
             entry_id = entry_data.get("id")
@@ -259,9 +370,30 @@ class DatasetValidator:
             entry_data = rec.data
             entry_id = entry_data.get("id")
             for xref in entry_data.get("cross_references", []):
-                if isinstance(xref, dict):
-                    target_id = xref.get("target_entry_id")
-                    if target_id and target_id not in all_entry_ids:
+                if not isinstance(xref, dict):
+                    errors.append(
+                        DatasetError(
+                            message=f"Cross-reference record must be an object (dict), found '{type(xref).__name__}'.",
+                            file_path=rec.file_path,
+                            line_number=rec.line_number,
+                            record_id=entry_id,
+                        )
+                    )
+                    continue
+
+                raw_target = xref.get("target_entry_id") or xref.get("entry_id")
+                if raw_target is None or not str(raw_target).strip():
+                    errors.append(
+                        DatasetError(
+                            message="Cross-reference target ID cannot be empty or missing.",
+                            file_path=rec.file_path,
+                            line_number=rec.line_number,
+                            record_id=entry_id,
+                        )
+                    )
+                else:
+                    target_id = str(raw_target).strip()
+                    if target_id not in all_entry_ids:
                         errors.append(
                             DatasetError(
                                 message=(
@@ -281,6 +413,11 @@ class DatasetValidator:
             lexicon_entries_count=len(lexicon_records),
             sources_count=len(sources_registry),
             files_scanned=files_scanned,
+            status_counts=status_counts,
+            missing_citation_entries=missing_citation_entries,
+            ai_candidate_entries=ai_candidate_entries,
+            unverified_glosses_count=unverified_glosses_count,
+            unverified_glosses_by_lang=unverified_glosses_by_lang,
         )
 
 

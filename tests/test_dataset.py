@@ -212,6 +212,73 @@ class TestBatchDatasetValidation(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertTrue(any("Cross-reference target 'KB-TEST-NONEXISTENT' does not exist" in str(e) for e in result.errors))
 
+    def test_cross_reference_jsonl_key_format(self):
+        """Cross-references using the JSONL key 'entry_id' validate successfully when target exists."""
+        src_file = self.dir_path / "sources.jsonl"
+        src_file.write_text(json.dumps(make_fictional_source_dict("SRC-PUB-00001")) + "\n", encoding="utf-8")
+
+        target_entry = make_fictional_entry_dict("KB-TEST-0000001", example_id="EX-01")
+        source_entry = make_fictional_entry_dict("KB-TEST-0000002", example_id="EX-02")
+        # Use the actual JSONL field format: entry_id + relationship
+        source_entry["cross_references"] = [{"entry_id": "KB-TEST-0000001", "relationship": "component_word"}]
+
+        lex_file = self.dir_path / "lexicon.jsonl"
+        lex_file.write_text(json.dumps(target_entry) + "\n" + json.dumps(source_entry) + "\n", encoding="utf-8")
+
+        result = validate_dataset_files([lex_file], [src_file])
+        self.assertTrue(result.is_valid, f"Expected valid result, got: {[str(e) for e in result.errors]}")
+
+    def test_missing_cross_reference_using_jsonl_key(self):
+        """Missing cross-reference target is caught when specified using JSONL key 'entry_id'."""
+        src_file = self.dir_path / "sources.jsonl"
+        src_file.write_text(json.dumps(make_fictional_source_dict("SRC-PUB-00001")) + "\n", encoding="utf-8")
+
+        entry = make_fictional_entry_dict("KB-TEST-0000001", example_id="EX-01")
+        entry["cross_references"] = [{"entry_id": "KB-TEST-NONEXISTENT-99", "relationship": "see_also"}]
+
+        lex_file = self.dir_path / "lexicon.jsonl"
+        lex_file.write_text(json.dumps(entry) + "\n", encoding="utf-8")
+
+        result = validate_dataset_files([lex_file], [src_file])
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any("Cross-reference target 'KB-TEST-NONEXISTENT-99' does not exist" in str(e) for e in result.errors))
+
+    def test_empty_and_whitespace_cross_reference_targets(self):
+        """Cross-references with empty or whitespace-only target IDs are reported as errors."""
+        src_file = self.dir_path / "sources.jsonl"
+        src_file.write_text(json.dumps(make_fictional_source_dict("SRC-PUB-00001")) + "\n", encoding="utf-8")
+
+        # 1. Empty string using JSONL format
+        entry_empty = make_fictional_entry_dict("KB-TEST-0000001", example_id="EX-01")
+        entry_empty["cross_references"] = [{"entry_id": "", "relationship": "see_also"}]
+
+        # 2. Whitespace-only string using JSONL format
+        entry_ws = make_fictional_entry_dict("KB-TEST-0000002", example_id="EX-02")
+        entry_ws["cross_references"] = [{"entry_id": "   ", "relationship": "see_also"}]
+
+        # 3. Missing target key altogether
+        entry_missing = make_fictional_entry_dict("KB-TEST-0000003", example_id="EX-03")
+        entry_missing["cross_references"] = [{"relationship": "see_also"}]
+
+        # 4. Whitespace-only using model format target_entry_id
+        entry_model_ws = make_fictional_entry_dict("KB-TEST-0000004", example_id="EX-04")
+        entry_model_ws["cross_references"] = [{"target_entry_id": "  \t  ", "relation_type": "see_also"}]
+
+        lex_file = self.dir_path / "lex_empty_targets.jsonl"
+        lex_file.write_text(
+            json.dumps(entry_empty) + "\n"
+            + json.dumps(entry_ws) + "\n"
+            + json.dumps(entry_missing) + "\n"
+            + json.dumps(entry_model_ws) + "\n",
+            encoding="utf-8",
+        )
+
+        result = validate_dataset_files([lex_file], [src_file])
+        self.assertFalse(result.is_valid)
+        err_msgs = [str(e) for e in result.errors]
+        empty_target_errs = [e for e in err_msgs if "Cross-reference target ID cannot be empty or missing" in e]
+        self.assertEqual(len(empty_target_errs), 4, f"Expected 4 empty target errors, got: {empty_target_errs}")
+
     def test_multiple_errors_reported_together(self):
         """Batch validation reports multiple diverse errors together without stopping at the first."""
         src_file = self.dir_path / "sources.jsonl"
