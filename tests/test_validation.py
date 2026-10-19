@@ -477,6 +477,101 @@ class TestValidationSystem(unittest.TestCase):
         unreg_errors = [e for e in errors_verified if "SRC-PUB-UNREGISTERED-777" in e]
         self.assertEqual(len(unreg_errors), 1)
 
+    def test_whitespace_only_source_id_consistency_and_no_duplicates(self):
+        """Rule: Whitespace-only source_id produces consistent missing source error without duplicate or contradictory errors."""
+        authorized_reviewer = ReviewerRegistration(
+            reviewer_id="REV-LEAD-01",
+            role=ReviewerRole.LINGUIST.value,
+            authorized_scopes=["headword_orthography", "definitions_en", "source_locator_match"],
+            is_active=True,
+        )
+        validator = LexiconValidator(
+            sources_registry={self.source_fixture.source_id: self.source_fixture},
+            reviewer_registry={"REV-LEAD-01": authorized_reviewer},
+        )
+        entry = get_fictional_entry_fixture(
+            entry_id="KB-LEX-0000025",
+            status=Status.VERIFIED.value,
+            sense_status=Status.VERIFIED.value,
+            is_test_fixture=False,
+        )
+        entry.provenance.evidence_records = [
+            EvidenceRecord(
+                source_id="   ",
+                locator="p. 50",
+                evidence_type="published_print_citation",
+            )
+        ]
+        entry.provenance.reviews = [
+            ReviewAuditRecord(
+                review_id="REV-2026-0100",
+                reviewer_id="REV-LEAD-01",
+                reviewer_role=ReviewerRole.LINGUIST.value,
+                date_reviewed="2026-10-17T00:00:00Z",
+                scope_reviewed=["headword_orthography", "definitions_en", "source_locator_match"],
+                verification_finding="confirmed_accurate",
+                audit_notes="Audit note",
+            )
+        ]
+        errors = validator.validate_entry(entry)
+        self.assertTrue(
+            any("evidence record missing 'source_id'" in e for e in errors),
+            f"Expected missing source_id error, got: {errors}",
+        )
+        self.assertFalse(
+            any("references unregistered source_id" in e for e in errors),
+            f"Unexpected contradictory unregistered source_id error in: {errors}",
+        )
+        missing_errors = [e for e in errors if "evidence record missing 'source_id'" in e]
+        self.assertEqual(len(missing_errors), 1)
+
+        v_errors = validator._validate_verification_evidence(entry)
+        self.assertTrue(any("evidence record missing 'source_id'" in e for e in v_errors))
+        self.assertFalse(any("references unregistered source_id" in e for e in v_errors))
+
+    def test_verified_entry_missing_provenance_defensive_check(self):
+        """Rule: Malformed VERIFIED entry with provenance is None produces validation errors instead of AttributeError."""
+        authorized_reviewer = ReviewerRegistration(
+            reviewer_id="REV-LEAD-01",
+            role=ReviewerRole.LINGUIST.value,
+            authorized_scopes=["headword_orthography", "definitions_en", "source_locator_match"],
+            is_active=True,
+        )
+        validator = LexiconValidator(
+            sources_registry={self.source_fixture.source_id: self.source_fixture},
+            reviewer_registry={"REV-LEAD-01": authorized_reviewer},
+        )
+        entry = get_fictional_entry_fixture(
+            entry_id="KB-LEX-0000026",
+            status=Status.VERIFIED.value,
+            sense_status=Status.VERIFIED.value,
+            is_test_fixture=False,
+        )
+        entry.provenance = None
+
+        errors = validator.validate_entry(entry)
+        self.assertTrue(
+            any("provenance is missing" in e for e in errors),
+            f"Expected provenance missing validation error, got: {errors}",
+        )
+
+        v_errors = validator._validate_verification_evidence(entry)
+        self.assertTrue(
+            any("provenance is missing" in e for e in v_errors),
+            f"Expected provenance missing validation error in direct check, got: {v_errors}",
+        )
+
+        # Verify fail-closed safeguard is preserved when reviewer registry is absent
+        validator_no_registry = LexiconValidator(
+            sources_registry={self.source_fixture.source_id: self.source_fixture},
+            reviewer_registry=None,
+        )
+        errors_no_reg = validator_no_registry.validate_entry(entry)
+        self.assertTrue(
+            any("verification check FAILED CLOSED" in e for e in errors_no_reg),
+            f"Expected fail-closed error to be preserved, got: {errors_no_reg}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

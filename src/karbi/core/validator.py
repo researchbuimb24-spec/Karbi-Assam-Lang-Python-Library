@@ -283,6 +283,11 @@ class LexiconValidator:
             )
             return errors
 
+        # Defensive check for missing provenance
+        if entry.provenance is None:
+            errors.append(f"Entry '{entry.id}': marked as VERIFIED but provenance is missing.")
+            return errors
+
         # Rule B: Evidence records must be present
         if not entry.provenance.evidence_records or len(entry.provenance.evidence_records) == 0:
             errors.append(f"Entry '{entry.id}': marked as VERIFIED but has 0 evidence records.")
@@ -290,7 +295,7 @@ class LexiconValidator:
 
         # Check every evidence record references a valid registered source
         for ev in entry.provenance.evidence_records:
-            if not ev.source_id:
+            if not ev.source_id or not ev.source_id.strip():
                 errors.append(f"Entry '{entry.id}': evidence record missing 'source_id'.")
             elif ev.source_id not in self.sources_registry:
                 errors.append(

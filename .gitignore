@@ -1,4 +1,3 @@
-
 # Generated Python files
 __pycache__/
 *.py[cod]
@@ -18,3 +17,31 @@ build/
 .venv/
 venv/
 .pytest_cache/
+
+# SQLite journal and temporary files
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Secrets and credentials
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials.json
+client_secret*.json
