@@ -1,6 +1,6 @@
 # Karbi Language Python Library (`karbi`)
 
-A comprehensive, open-source Python library and cultural knowledge repository for the **Karbi language** (*Arleng alam*), primarily spoken in the Karbi Anglong and West Karbi Anglong regions of Assam, India *(demographic and geographic descriptions subject to formal verification against census and scholarly sources)*.
+A lightweight Python library and curated reference repository for the **Karbi language** (*Arleng alam*), primarily spoken in the Karbi Anglong and West Karbi Anglong regions of Assam, India *(demographic and geographic descriptions subject to formal verification against census and scholarly sources)*.
 
 > [!IMPORTANT]
 > **Verification & Provenance Notice:** All linguistic classifications, orthographic standards, dialect designations, and cultural narratives in this project are preliminary working outlines that require formal verification against authorized academic publications, recognized community bodies, or native speaker authorities. Unverified claims, synthetic data, or AI-generated candidates will not be treated as established facts.
@@ -14,7 +14,7 @@ The `karbi` library provides a lightweight, zero-external-dependency Python inte
 * Direct Karbi headword lookup and automatic modern spelling-variant resolution.
 * Multilingual translation into Karbi from English, Hindi, Assamese, and Bengali.
 * Unified search across headwords, variants, and definition glosses.
-* Phonetic pronunciations in International Phonetic Alphabet (IPA).
+* Phonetic pronunciations in International Phonetic Alphabet (IPA) for entries where phonetic notation is documented in source records.
 * Transparent bibliographic source citations linking every attested entry to primary historical or academic records.
 * Strict filtering to separate authentic, attested records from unverified translations.
 
@@ -23,7 +23,7 @@ The `karbi` library provides a lightweight, zero-external-dependency Python inte
 * **Lexicon Scope:** The current lexical database represents a curated core lexicon of 340 headwords based on historical, published literature (notably Edward Stack & Sir Charles Lyall's *The Mikirs*, 1908, and Rev. R. E. Neighbor's *A Vocabulary in English and Mikir*, 1878). It is not yet an exhaustive or complete dictionary of all contemporary Karbi vocabulary.
 * **Unverified Translation Glosses:** While English glosses are largely source-attested from published documentation, many corresponding Hindi, Assamese, and Bengali translations are unverified working glosses that await formal review and native speaker corroboration.
 * **Orthography:** Orthographic conventions in this library represent primary source attestations alongside common contemporary Roman-script representations. Ongoing orthographic standardization by literary bodies (such as *Karbi Lammet Amei*) is respected and will guide formal updates.
-* **Cultural Knowledge:** Folklore, rituals, and deity records are preliminary summaries accompanied by cultural sensitivity guidelines and require further community consent and elder validation.
+* **Cultural Knowledge:** Folklore, rituals, and deity outlines in `karbi.culture` are preliminary summaries accompanied by cultural sensitivity guidelines and require further community consent and elder validation.
 
 ---
 
@@ -33,8 +33,8 @@ The library requires **Python 3.9** or higher and has **zero external runtime de
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/example/karbi.git
-cd Arunachal-Pradesh-Lang-Python-Library
+git clone https://github.com/researchbuimb24-spec/Karbi-Assam-Lang-Python-Library.git
+cd Karbi-Assam-Lang-Python-Library
 ```
 
 ### 2. Create and activate a virtual environment
@@ -71,7 +71,7 @@ import karbi
 ```
 
 ### 1. Unified Search with `search()`
-`karbi.search(query, lang="auto", verified_only=False)` searches across Karbi headwords, contemporary spelling variants, and definition glosses in all supported languages.
+`karbi.search(query, lang="auto", verified_only=False)` searches across Karbi headwords, contemporary spelling variants, and definition glosses in all supported languages. *(Note: IPA pronunciation is available only for entries that document phonetic notation in primary source records; otherwise `r.phonetics_ipa` is `None`.)*
 
 ```python
 import karbi
@@ -80,7 +80,7 @@ import karbi
 results = karbi.search("arlèng")
 for r in results:
     print(f"Lemma: {r.karbi_lemma} ({r.part_of_speech})")
-    print(f"Pronunciation (IPA): {r.phonetics_ipa}")
+    print(f"Pronunciation (IPA): {r.phonetics_ipa or 'N/A'}")
     print(f"English: {r.get_meanings('en')}")
     print(f"Verified: {r.is_verified} (Status: {r.status})")
     print(f"Source(s): {r.source_citations}")
@@ -121,7 +121,7 @@ import karbi
 matches = karbi.translate("water", from_lang="en")
 for match in matches:
     print(f"Karbi: {match.karbi_lemma}")
-    print(f"Pronunciation: {match.phonetics_ipa}")
+    print(f"Pronunciation (IPA): {match.phonetics_ipa or 'N/A'}")
     print(f"Verification: {match.is_verified} ({match.status})")
     print(f"Citations: {match.source_citations}")
 
@@ -365,10 +365,10 @@ Linguistic and cultural documentation of indigenous communities requires ethical
 ├── .gitignore          # Git exclusion rules
 ├── pyproject.toml      # Standard Python package configuration (setuptools + pytest)
 ├── README.md           # Project developer documentation
-├── karbi.db            # Embedded SQLite runtime database with FTS5
+├── karbi.db            # Compiled SQLite runtime database with FTS5 (generated at runtime)
 ├── data/               # Source JSON Lines data
 │   ├── lexicon/        # Sharded dictionary entries
-│   ├── culture/        # Rituals, folklore, and cultural records
+│   ├── culture/        # Directory reserved for cultural records (rituals, folklore, deities)
 │   └── sources/        # Bibliographic references and citations
 ├── src/
 │   └── karbi/          # Python library source code
@@ -383,13 +383,15 @@ Linguistic and cultural documentation of indigenous communities requires ethical
 │       ├── culture.py  # Cultural records and ethics policy
 │       └── core/       # Database compilation, models, and validation
 └── tests/              # Automated unit, integration, and packaging tests
-    ├── test_api.py
-    ├── test_packaging.py
-    ├── test_cli.py
-    ├── test_translation.py
     ├── test_alphabet_and_grammar.py
+    ├── test_api.py
+    ├── test_cli.py
+    ├── test_contributor_workflow.py
     ├── test_dataset.py
     ├── test_loader.py
+    ├── test_packaging.py
+    ├── test_resources.py
+    ├── test_translation.py
     └── test_validation.py
 ```
 
