@@ -190,3 +190,28 @@ class TestPublicPythonAPI:
         json_str = json.dumps(d, ensure_ascii=False)
         parsed = json.loads(json_str)
         assert parsed["karbi_lemma"] == "arlèng"
+
+    def test_dictionary_entry_as_dict(self):
+        """DictionaryEntry serializes cleanly into dictionary and JSON."""
+        entry = karbi.lookup("arlèng")
+        assert entry is not None
+        d = entry.as_dict()
+
+        assert isinstance(d, dict)
+        assert d["lemma"] == "arlèng"
+        assert d["script"] == "latin"
+        assert d["dialect"] == "rongkhang"
+        assert d["status"] == "SOURCE_ATTESTED"
+        assert d["phonetics_ipa"] == "/aɾˈlɛŋ/"
+        assert isinstance(d["senses"], list)
+        assert isinstance(d["spelling_variants"], list)
+        assert isinstance(d["cross_references"], list)
+        assert isinstance(d["provenance"], dict)
+        assert isinstance(d["source_citations"], list)
+        assert len(d["source_citations"]) > 0
+
+        # Confirm JSON serialization succeeds
+        json_str = json.dumps(d, ensure_ascii=False)
+        parsed = json.loads(json_str)
+        assert parsed["lemma"] == "arlèng"
+        assert parsed["status"] == "SOURCE_ATTESTED"

@@ -20,7 +20,7 @@ The `karbi` library provides a lightweight, zero-external-dependency Python inte
 
 ### Current Limitations
 * **Pre-Alpha Status (`0.1.0`):** The project is in active initial development.
-* **Lexicon Scope:** The current lexical database represents a curated core lexicon based on historical, published literature (notably Edward Stack & Sir Charles Lyall's *The Mikirs*, 1908). It is not yet an exhaustive or complete dictionary of all contemporary Karbi vocabulary.
+* **Lexicon Scope:** The current lexical database represents a curated core lexicon of 340 headwords based on historical, published literature (notably Edward Stack & Sir Charles Lyall's *The Mikirs*, 1908, and Rev. R. E. Neighbor's *A Vocabulary in English and Mikir*, 1878). It is not yet an exhaustive or complete dictionary of all contemporary Karbi vocabulary.
 * **Unverified Translation Glosses:** While English glosses are largely source-attested from published documentation, many corresponding Hindi, Assamese, and Bengali translations are unverified working glosses that await formal review and native speaker corroboration.
 * **Orthography:** Orthographic conventions in this library represent primary source attestations alongside common contemporary Roman-script representations. Ongoing orthographic standardization by literary bodies (such as *Karbi Lammet Amei*) is respected and will guide formal updates.
 * **Cultural Knowledge:** Folklore, rituals, and deity records are preliminary summaries accompanied by cultural sensitivity guidelines and require further community consent and elder validation.
@@ -340,9 +340,13 @@ pytest tests/test_translation.py
 ## Source Citations & Community-Review Limitations
 
 ### Bibliographic Citations
-Attested records cite verifiable historical sources, including:
-* **Stack, Edward & Lyall, Sir Charles (1908).** *The Mikirs*. London: David Nutt.
-* Primary source IDs and page locators (e.g. `SRC-HIST-001`, `p. 74, 80`) are stored in `data/sources/sources.jsonl` and embedded in `karbi.db`.
+Attested records cite verifiable historical sources registered in `data/sources/sources.jsonl`:
+* **`SRC-PUB-00001`**: **Stack, Edward & Lyall, Sir Charles (1908).** *The Mikirs*. London: David Nutt.
+* **`SRC-PUB-00002`**: **Grierson, Sir George Abraham (1903).** *Linguistic Survey of India*, Vol. III: Tibeto-Burman Family, Part II: Specimens of the Bodo, Naga, and Kachin Groups. Calcutta: Superintendent of Government Printing.
+* **`SRC-PUB-00003`**: **Neighbor, Rev. R. E. (1878).** *A Vocabulary in English and Mikir: With Sentences Illustrating the Use of Words*. Calcutta: Baptist Mission Press.
+* **`SRC-PUB-00004`**: **Kay, Sardoka Perrin & Stack, Edward (1904).** *An English-Mikir Vocabulary, with Assamese Equivalents, to which have been added a few Mikir phrases*. Shillong: Assam Secretariat Press.
+
+Primary source IDs and exact page locators (e.g. `SRC-PUB-00001`, `p. 74, 80` or `SRC-PUB-00003`, `p. 5`) are stored in `data/sources/sources.jsonl` and embedded in `karbi.db`.
 
 ### Unverified Translations
 In both the Python API and CLI output, unverified definitions are explicitly flagged (`[UNVERIFIED]` badge, `is_verified=False`). Users and researchers must not cite unverified candidate translations as verified Karbi language facts.

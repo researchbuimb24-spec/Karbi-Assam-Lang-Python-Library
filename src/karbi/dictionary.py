@@ -72,6 +72,23 @@ class DictionaryEntry:
                     variants.append(t)
         return variants
 
+    def as_dict(self) -> Dict[str, Any]:
+        """Serializes the dictionary entry into a clean Python dictionary."""
+        return {
+            "entry_id": self.entry_id,
+            "lemma": self.lemma,
+            "script": self.script,
+            "dialect": self.dialect,
+            "status": self.status,
+            "phonetics_ipa": self.phonetics_ipa,
+            "senses": self.senses,
+            "spelling_variants": self.spelling_variants,
+            "cross_references": self.cross_references,
+            "provenance": self.provenance,
+            "source_citation": self.source_citation,
+            "source_citations": self.source_citations,
+        }
+
 
 def lookup(
     karbi_word: str,
