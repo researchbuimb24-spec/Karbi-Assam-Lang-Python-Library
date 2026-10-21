@@ -20,7 +20,7 @@ The `karbi` library provides a lightweight, zero-external-dependency Python inte
 
 ### Current Limitations
 * **Pre-Alpha Status (`0.1.0`):** The project is in active initial development.
-* **Lexicon Scope:** The current lexical database represents a curated core lexicon of 340 headwords based on historical, published literature (notably Edward Stack & Sir Charles Lyall's *The Mikirs*, 1908, and Rev. R. E. Neighbor's *A Vocabulary in English and Mikir*, 1878). It is not yet an exhaustive or complete dictionary of all contemporary Karbi vocabulary.
+* **Lexicon Scope:** The current lexical database represents a curated core lexicon of 409 headwords based on historical, published literature (notably Edward Stack & Sir Charles Lyall's *The Mikirs*, 1908, and Rev. R. E. Neighbor's *A Vocabulary in English and Mikir*, 1878). It is not yet an exhaustive or complete dictionary of all contemporary Karbi vocabulary.
 * **Unverified Translation Glosses:** While English glosses are largely source-attested from published documentation, many corresponding Hindi, Assamese, and Bengali translations are unverified working glosses that await formal review and native speaker corroboration.
 * **Orthography:** Orthographic conventions in this library represent primary source attestations alongside common contemporary Roman-script representations. Ongoing orthographic standardization by literary bodies (such as *Karbi Lammet Amei*) is respected and will guide formal updates.
 * **Cultural Knowledge:** Folklore, rituals, and deity outlines in `karbi.culture` are preliminary summaries accompanied by cultural sensitivity guidelines and require further community consent and elder validation.
@@ -109,6 +109,11 @@ variant_entry = karbi.lookup("hem")
 if variant_entry:
     print(f"Resolved to canonical lemma: {variant_entry.lemma}")
     print(f"Meanings (EN): {variant_entry.get_meanings('en')}")
+
+# Retrieve all homonyms for a word with lookup_all() (e.g., verb 'cho' vs noun 'cho')
+homonyms = karbi.lookup_all("cho")
+for h in homonyms:
+    print(f"[{h.entry_id}] {h.lemma} ({h.senses[0]['part_of_speech']}): {h.get_meanings('en')}")
 ```
 
 ### 3. Multilingual Translation with `translate()`

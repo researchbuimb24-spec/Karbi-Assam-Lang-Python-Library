@@ -114,10 +114,24 @@ class TestPublicPythonAPI:
         assert search("nonexistentword123", lang="karbi") == []
         assert search("nonexistentword123", lang="en") == []
         assert search("nonexistentword123", lang="auto") == []
+        assert search("water", lang="invalid_unsupported_lang") == []
         assert search("") == []
         assert search("    ") == []
+        assert search(None) == []
 
         assert karbi.lookup("nonexistentword123") is None
+        assert karbi.lookup(None) is None
+        assert karbi.lookup_all(None) == []
+
+    def test_search_result_populates_entry_id(self):
+        """SearchResult has entry_id populated from both Karbi lookup and multilingual search."""
+        res_karbi = search("arlèng", lang="karbi")
+        assert len(res_karbi) == 1
+        assert res_karbi[0].entry_id == "KB-LEX-0000001"
+
+        res_trans = search("water", lang="en")
+        assert len(res_trans) >= 1
+        assert res_trans[0].entry_id == "KB-LEX-0000003"
 
     def test_batch_lookup(self):
         """batch_lookup retrieves multiple Karbi headwords and variants in a single call."""

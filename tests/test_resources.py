@@ -141,3 +141,24 @@ def test_missing_resource_raises_error():
         with pytest.raises(FileNotFoundError) as exc_info:
             get_packaged_resource_paths()
         assert "Could not locate packaged Karbi runtime resources" in str(exc_info.value)
+
+
+def test_database_auto_recompiles_when_stale():
+    """ensure_database_ready detects when input resources are newer than the database and recompiles."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        stale_db = Path(tmpdir) / "stale_test.db"
+
+        # Initialize fresh DB
+        ensure_database_ready(stale_db)
+        assert stale_db.is_file()
+
+        # Artificially set database mtime to 1 hour in the past
+        past_time = stale_db.stat().st_mtime - 3600
+        os.utime(stale_db, (past_time, past_time))
+        assert stale_db.stat().st_mtime < stale_db.stat().st_ctime or stale_db.stat().st_mtime == past_time
+
+        # ensure_database_ready should detect that data files are newer than past_time and recompile
+        res = ensure_database_ready(stale_db)
+        assert res == stale_db
+        # mtime should have been updated to current time
+        assert stale_db.stat().st_mtime > past_time + 100

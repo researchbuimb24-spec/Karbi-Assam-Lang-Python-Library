@@ -244,6 +244,209 @@ class TestMultilingualTranslation(unittest.TestCase):
                 ["Stack & Lyall (1908) (p. 10)", "Grierson (1903) (p. 385)"],
             )
 
+    def test_unsupported_language_returns_empty_without_fallback(self):
+        """Unsupported language codes return empty list and never fall back to English FTS."""
+        # 'fr' is not in SUPPORTED_LANGUAGES, must not return English results
+        fr_matches = karbi.translate("house", from_lang="fr")
+        self.assertEqual(fr_matches, [])
+
+        xyz_matches = karbi.translate("water", from_lang="xyz_nonexistent")
+        self.assertEqual(xyz_matches, [])
+
+    def test_none_and_invalid_inputs(self):
+        """None or non-string inputs in translate, lookup, and lookup_all are handled safely."""
+        self.assertEqual(karbi.translate(None, from_lang="en"), [])
+        self.assertEqual(karbi.translate("water", from_lang=None), [])
+        self.assertIsNone(karbi.lookup(None))
+        self.assertEqual(karbi.lookup_all(None), [])
+
+    def test_homonym_lookup_all(self):
+        """lookup_all retrieves both homonym entries, while lookup returns the primary entry."""
+        # 'cho' has verb (KB-LEX-0000154, 'to eat') and noun (KB-LEX-0000323, 'axe, hatchet')
+        all_entries = karbi.lookup_all("cho")
+        self.assertEqual(len(all_entries), 2)
+        lemmas = [e.lemma for e in all_entries]
+        self.assertTrue(all(l == "cho" for l in lemmas))
+        eids = [e.entry_id for e in all_entries]
+        self.assertIn("KB-LEX-0000154", eids)
+        self.assertIn("KB-LEX-0000323", eids)
+
+        # Backward-compatible lookup() returns the first entry
+        single = karbi.lookup("cho")
+        self.assertIsNotNone(single)
+        self.assertEqual(single.entry_id, "KB-LEX-0000154")
+
+    def test_translation_match_populates_entry_id(self):
+        """TranslationMatch includes the entry_id of the matched lexicon entry."""
+        matches = karbi.translate("water", from_lang="en")
+        self.assertGreaterEqual(len(matches), 1)
+        self.assertEqual(matches[0].entry_id, "KB-LEX-0000003")
+
+    def test_newly_attested_entries(self):
+        """Newly added entries from Stack & Lyall (1908) can be looked up and translated."""
+        # 1. Pronoun 'la'
+        entry_la = karbi.lookup("la")
+        self.assertIsNotNone(entry_la)
+        self.assertEqual(entry_la.entry_id, "KB-LEX-0000341")
+        self.assertIn("The Mikirs (p. 76)", entry_la.source_citations[0])
+
+        # 2. Classifier 'jòn'
+        entry_jon = karbi.lookup("jòn")
+        self.assertIsNotNone(entry_jon)
+        self.assertEqual(entry_jon.entry_id, "KB-LEX-0000346")
+        self.assertIn("The Mikirs (p. 78)", entry_jon.source_citations[0])
+
+        # Spelling variant 'jon' resolves to 'jòn'
+        entry_jon_var = karbi.lookup("jon")
+        self.assertIsNotNone(entry_jon_var)
+        self.assertEqual(entry_jon_var.lemma, "jòn")
+
+        # 3. 'roi' (bracelet)
+        entry_roi = karbi.lookup("roi")
+        self.assertIsNotNone(entry_roi)
+        self.assertEqual(entry_roi.entry_id, "KB-LEX-0000350")
+
+        # 4. 'puthi' (book)
+        entry_puthi = karbi.lookup("puthi")
+        self.assertIsNotNone(entry_puthi)
+        self.assertEqual(entry_puthi.entry_id, "KB-LEX-0000351")
+
+    def test_newly_attested_entries_batch_two(self):
+        """Newly added entries KB-LEX-0000352 to 372 from Stack & Lyall (1908) can be looked up and translated."""
+        import unicodedata
+
+        # 1. Numeral krē-īsī (11) and modern variant kresi
+        entry_11 = karbi.lookup("krē-īsī")
+        self.assertIsNotNone(entry_11)
+        self.assertEqual(entry_11.entry_id, "KB-LEX-0000352")
+        self.assertIn("eleven", entry_11.get_meanings("en"))
+        entry_11_var = karbi.lookup("kresi")
+        self.assertIsNotNone(entry_11_var)
+        self.assertEqual(entry_11_var.entry_id, "KB-LEX-0000352")
+
+        # 2. Reflexive pronoun āmethàng / methang
+        entry_methang = karbi.lookup("āmethàng")
+        self.assertIsNotNone(entry_methang)
+        self.assertEqual(entry_methang.entry_id, "KB-LEX-0000355")
+        entry_methang_var = karbi.lookup("methang")
+        self.assertIsNotNone(entry_methang_var)
+        self.assertEqual(entry_methang_var.entry_id, "KB-LEX-0000355")
+
+        # 3. Postposition ā-thàk / athak
+        entry_athak = karbi.lookup("ā-thàk")
+        self.assertIsNotNone(entry_athak)
+        self.assertEqual(entry_athak.entry_id, "KB-LEX-0000358")
+        trans_upon = karbi.translate("upon", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "ā-thàk" for m in trans_upon))
+
+        # 4. Negative existential āvē and emphatic kālī
+        entry_ave = karbi.lookup("āvē")
+        self.assertIsNotNone(entry_ave)
+        self.assertEqual(entry_ave.entry_id, "KB-LEX-0000369")
+        entry_kali = karbi.lookup("kālī")
+        self.assertIsNotNone(entry_kali)
+        self.assertEqual(entry_kali.entry_id, "KB-LEX-0000370")
+
+        # 5. Nouns dohòn (money) and kaibòng (club)
+        entry_dohon = karbi.lookup("dohòn")
+        self.assertIsNotNone(entry_dohon)
+        self.assertEqual(entry_dohon.entry_id, "KB-LEX-0000371")
+        entry_kaibong = karbi.lookup("kaibòng")
+        self.assertIsNotNone(entry_kaibong)
+        self.assertEqual(entry_kaibong.entry_id, "KB-LEX-0000372")
+
+    def test_unicode_nfc_nfd_equivalence(self):
+        """Looking up words in NFD decomposed Unicode returns the correct entry via NFC normalization."""
+        import unicodedata
+
+        # Decompose arlèng into NFD ('e' + combining grave '\u0300')
+        nfd_arleng = unicodedata.normalize("NFD", "arlèng")
+        self.assertNotEqual(nfd_arleng, "arlèng")  # Different string codepoints
+        entry = karbi.lookup(nfd_arleng)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.entry_id, "KB-LEX-0000001")
+
+        # Decompose hèm into NFD
+        nfd_hem = unicodedata.normalize("NFD", "hèm")
+        self.assertNotEqual(nfd_hem, "hèm")
+        entry_hem = karbi.lookup(nfd_hem)
+        self.assertIsNotNone(entry_hem)
+        self.assertEqual(entry_hem.entry_id, "KB-LEX-0000002")
+
+        # Translate in NFD
+        matches = karbi.translate(unicodedata.normalize("NFD", "water"), from_lang="en")
+        self.assertGreaterEqual(len(matches), 1)
+
+    def test_punctuation_tolerant_lookup_and_translation(self):
+        """Punctuation surrounding query terms is tolerated without breaking lookup."""
+        # Trailing question mark
+        entry_q = karbi.lookup("arlèng?")
+        self.assertIsNotNone(entry_q)
+        self.assertEqual(entry_q.entry_id, "KB-LEX-0000001")
+
+        # Quotes around term
+        entry_quotes = karbi.lookup('"hèm"')
+        self.assertIsNotNone(entry_quotes)
+        self.assertEqual(entry_quotes.entry_id, "KB-LEX-0000002")
+
+        # Trailing exclamation mark in translation
+        matches = karbi.translate("water!", from_lang="en")
+        self.assertGreaterEqual(len(matches), 1)
+        self.assertEqual(matches[0].karbi_lemma, "làng")
+
+    def test_new_37_lexicon_entries(self):
+        """Verify lookup and translation for the newly added 37 source-attested entries."""
+        # 1. Numerals and prefixes
+        entry_batai = karbi.lookup("bātai")
+        self.assertIsNotNone(entry_batai)
+        self.assertEqual(entry_batai.entry_id, "KB-LEX-0000373")
+        self.assertEqual(entry_batai.senses[0]["part_of_speech"], "prefix")
+
+        entry_pur = karbi.lookup("pur")
+        self.assertIsNotNone(entry_pur)
+        self.assertEqual(entry_pur.entry_id, "KB-LEX-0000374")
+
+        # 2. Animals
+        entry_frog = karbi.lookup("chònghōlosō")
+        self.assertIsNotNone(entry_frog)
+        self.assertEqual(entry_frog.entry_id, "KB-LEX-0000381")
+        matches_frog = karbi.translate("frog", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "chònghōlosō" for m in matches_frog))
+
+        entry_squirrel = karbi.lookup("kāthē")
+        self.assertIsNotNone(entry_squirrel)
+        self.assertEqual(entry_squirrel.entry_id, "KB-LEX-0000382")
+
+        # 3. Crops & food
+        entry_maize = karbi.lookup("thèngthē")
+        self.assertIsNotNone(entry_maize)
+        self.assertEqual(entry_maize.entry_id, "KB-LEX-0000384")
+        matches_maize = karbi.translate("maize", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "thèngthē" for m in matches_maize))
+
+        entry_turmeric = karbi.lookup("thārmit")
+        self.assertIsNotNone(entry_turmeric)
+        self.assertEqual(entry_turmeric.entry_id, "KB-LEX-0000385")
+
+        # 4. Modals and folklore
+        entry_un = karbi.lookup("un")
+        self.assertIsNotNone(entry_un)
+        self.assertEqual(entry_un.entry_id, "KB-LEX-0000403")
+
+        entry_une = karbi.lookup("un-ē")
+        self.assertIsNotNone(entry_une)
+        self.assertEqual(entry_une.entry_id, "KB-LEX-0000404")
+
+        entry_recho = karbi.lookup("rēchō")
+        self.assertIsNotNone(entry_recho)
+        self.assertEqual(entry_recho.entry_id, "KB-LEX-0000408")
+        matches_king = karbi.translate("king", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "rēchō" for m in matches_king))
+
+        entry_orphan = karbi.lookup("jàngrēsō")
+        self.assertIsNotNone(entry_orphan)
+        self.assertEqual(entry_orphan.entry_id, "KB-LEX-0000409")
+
 
 if __name__ == "__main__":
     unittest.main()

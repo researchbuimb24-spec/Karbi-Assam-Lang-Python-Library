@@ -14,16 +14,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import sqlite3
 from typing import Any, Dict, List, Optional, Sequence, Union
+import unicodedata
 
 from karbi.core.dataset import DatasetValidationResult, validate_dataset_files
-from karbi.core.db import DEFAULT_DB_PATH
+from karbi.core.db import DEFAULT_DB_PATH, get_db_connection
 from karbi.core.resources import get_resource_paths
-from karbi.dictionary import DictionaryEntry, batch_lookup, lookup
+from karbi.dictionary import DictionaryEntry, batch_lookup, lookup, lookup_all
 from karbi.translator import (
     SUPPORTED_LANGUAGES,
     TranslationMatch,
     batch_translate,
+    ensure_database_ready,
     get_supported_languages,
     translate,
 )
@@ -177,6 +180,7 @@ def _match_to_search_result(
         dialect=match.dialect,
         examples=match.examples,
         cultural_notes=match.cultural_notes,
+        entry_id=match.entry_id,
         matched_language=match.source_language,
         raw_match=match,
     )
@@ -187,6 +191,7 @@ def search(
     lang: str = "auto",
     verified_only: bool = False,
     db_path: Optional[Union[str, Path]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> List[SearchResult]:
     """
     Unified, structured search across the Karbi dictionary and translation indices.
@@ -203,51 +208,71 @@ def search(
         lang: Language of the query: 'auto', 'karbi', 'en', 'hi', 'as', 'bn'.
         verified_only: If True, only returns verified entries and glosses.
         db_path: Optional custom path to SQLite database.
+        conn: Optional active sqlite3.Connection to reuse.
 
     Returns:
         List of structured SearchResult objects.
     """
-    clean_query = query.strip()
+    if query is None or not isinstance(query, str):
+        return []
+    clean_query = unicodedata.normalize("NFC", query.strip())
     if not clean_query:
         return []
 
-    results: List[SearchResult] = []
-    seen_lemmas: set[str] = set()
+    lang_code = (lang or "auto").strip().lower()
 
-    # 1. Explicit Karbi word lookup
-    if lang == "karbi":
-        entry = lookup(clean_query, db_path=db_path)
-        if entry:
-            if not verified_only or entry.status in ("SOURCE_ATTESTED", "VERIFIED"):
-                results.append(_entry_to_search_result(entry, clean_query, verified_only=verified_only))
-        return results
+    should_close = False
+    if conn is None:
+        target_db = ensure_database_ready(db_path)
+        conn = get_db_connection(target_db)
+        should_close = True
 
-    # 2. Specific source language translation
-    if lang in ("en", "hi", "as", "bn"):
-        matches = translate(clean_query, from_lang=lang, verified_only=verified_only, db_path=db_path)
-        for m in matches:
-            results.append(_match_to_search_result(m, clean_query, verified_only=verified_only))
-        return results
+    try:
+        results: List[SearchResult] = []
+        seen_lemmas: set[str] = set()
 
-    # 3. Auto-detection / Unified Search
-    # Check Karbi dictionary first (if not searching verified-only or if entry is verified)
-    entry = lookup(clean_query, db_path=db_path)
-    if entry:
-        if not verified_only or entry.status in ("SOURCE_ATTESTED", "VERIFIED"):
-            res = _entry_to_search_result(entry, clean_query, verified_only=verified_only)
-            results.append(res)
-            seen_lemmas.add(entry.lemma.lower())
+        # 1. Explicit Karbi word lookup
+        if lang_code == "karbi":
+            for entry in lookup_all(clean_query, db_path=db_path, conn=conn):
+                if not verified_only or entry.status in ("SOURCE_ATTESTED", "VERIFIED"):
+                    results.append(_entry_to_search_result(entry, clean_query, verified_only=verified_only))
+            return results
 
-    # Check translations across active languages
-    candidate_langs = ["en", "as", "hi", "bn"]
-    for code in candidate_langs:
-        matches = translate(clean_query, from_lang=code, verified_only=verified_only, db_path=db_path)
-        for m in matches:
-            if m.karbi_lemma.lower() not in seen_lemmas:
+        # 2. Specific source language translation
+        if lang_code in ("en", "hi", "as", "bn"):
+            matches = translate(clean_query, from_lang=lang_code, verified_only=verified_only, db_path=db_path, conn=conn)
+            for m in matches:
                 results.append(_match_to_search_result(m, clean_query, verified_only=verified_only))
-                seen_lemmas.add(m.karbi_lemma.lower())
+            return results
 
-    return results
+        # 3. Auto-detection / Unified Search
+        if lang_code == "auto":
+            # Check Karbi dictionary first (if not searching verified-only or if entry is verified)
+            for entry in lookup_all(clean_query, db_path=db_path, conn=conn):
+                if not verified_only or entry.status in ("SOURCE_ATTESTED", "VERIFIED"):
+                    res = _entry_to_search_result(entry, clean_query, verified_only=verified_only)
+                    results.append(res)
+                    seen_lemmas.add(entry.lemma.lower())
+
+            # Check translations across active languages
+            candidate_langs = ["en", "as", "hi", "bn"]
+            for code in candidate_langs:
+                matches = translate(clean_query, from_lang=code, verified_only=verified_only, db_path=db_path, conn=conn)
+                for m in matches:
+                    if m.karbi_lemma.lower() not in seen_lemmas:
+                        results.append(_match_to_search_result(m, clean_query, verified_only=verified_only))
+                        seen_lemmas.add(m.karbi_lemma.lower())
+
+            return results
+
+        # Unsupported or unknown language code requested
+        return []
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def batch_search(

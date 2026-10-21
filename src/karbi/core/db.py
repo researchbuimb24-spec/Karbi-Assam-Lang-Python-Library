@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -149,7 +150,9 @@ def init_db_schema(conn: sqlite3.Connection) -> None:
 
     # Create b-tree indexes for fast lookups
     cur.execute("CREATE INDEX IF NOT EXISTS idx_trans_lookup ON translations_index(from_lang, query_term);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_trans_entry ON translations_index(entry_id);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_lemma_lookup ON lexicon_entries(lemma);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_senses_entry ON senses(entry_id);")
 
     # 5. Full-Text Search (FTS5) Virtual Table
     cur.execute("""
@@ -227,7 +230,7 @@ def compile_database(
             if not eid:
                 continue
 
-            lemma = e.get("headword", {}).get("lemma", "")
+            lemma = unicodedata.normalize("NFC", e.get("headword", {}).get("lemma", ""))
             script = e.get("headword", {}).get("script", "latin")
             dialect = e.get("dialect", {}).get("primary_variety", "rongkhang")
             status = e.get("status", "DRAFT")
@@ -291,7 +294,7 @@ def compile_database(
                 # Populate Multilingual Index (Every word/gloss maps to Karbi lemma)
                 for lang_code, glosses in defs.items():
                     for gloss in _gloss_texts(glosses):
-                        cleaned = gloss.strip()
+                        cleaned = unicodedata.normalize("NFC", gloss.strip())
                         if cleaned:
                             cur.execute(
                                 """

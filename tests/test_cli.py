@@ -215,3 +215,21 @@ class TestCommandLineInterface:
         assert proc.returncode == 0
         assert "KARBI HEADWORD: arlèng" in proc.stdout
         assert "/aɾˈlɛŋ/" in proc.stdout
+
+    def test_cli_lookup_homonyms(self):
+        """Looking up a word with multiple homonyms displays all matching entries."""
+        # JSON mode
+        ret_j, out_j, _ = run_cli_capture(["lookup", "cho", "--json"])
+        assert ret_j == 0
+        data = json.loads(out_j)
+        assert data["found"] is True
+        assert len(data["entries"]) == 2
+        entry_ids = [e["entry_id"] for e in data["entries"]]
+        assert "KB-LEX-0000154" in entry_ids
+        assert "KB-LEX-0000323" in entry_ids
+
+        # Text mode
+        ret_t, out_t, _ = run_cli_capture(["lookup", "cho"])
+        assert ret_t == 0
+        assert "KB-LEX-0000154" in out_t or "to eat" in out_t
+        assert "axe" in out_t or "hatchet" in out_t

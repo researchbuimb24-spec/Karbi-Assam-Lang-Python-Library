@@ -14,7 +14,10 @@ Supported source languages:
 
 from __future__ import annotations
 import json
+import os
+import re
 import sqlite3
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -58,6 +61,7 @@ class TranslationMatch:
     source_citations: List[str] = field(default_factory=list)
     cultural_notes: Optional[str] = None
     dialect: str = "rongkhang"
+    entry_id: Optional[str] = None
 
     def get_definitions(self, lang: str = "en", verified_only: bool = False) -> List[str]:
         """
@@ -122,20 +126,26 @@ def _determine_gloss_verification(
 
 
 def ensure_database_ready(db_path: Optional[Union[str, Path]] = None) -> Path:
-    """Ensures the compiled SQLite database exists and is populated, compiling it if necessary."""
+    """Ensures the compiled SQLite database exists and is populated, compiling it if necessary or stale."""
     target_path = Path(db_path) if db_path is not None else get_default_db_path()
+    lex_files, src_files = get_resource_paths()
 
     if target_path.exists():
         conn = None
         try:
-            conn = get_db_connection(target_path)
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM lexicon_entries")
-            count = cur.fetchone()[0]
-            if count > 0:
-                return target_path
+            db_mtime = target_path.stat().st_mtime
+            input_files = [f for f in lex_files + src_files if f.is_file()]
+            is_stale = any(f.stat().st_mtime > db_mtime for f in input_files)
+
+            if not is_stale:
+                conn = get_db_connection(target_path)
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM lexicon_entries")
+                count = cur.fetchone()[0]
+                if count > 0:
+                    return target_path
         except Exception:
-            pass  # Recompile if corrupted or empty
+            pass  # Recompile if corrupted, empty, or stale
         finally:
             if conn:
                 try:
@@ -144,7 +154,6 @@ def ensure_database_ready(db_path: Optional[Union[str, Path]] = None) -> Path:
                     pass
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    lex_files, src_files = get_resource_paths()
     compile_database(lex_files, src_files, db_path=target_path)
     return target_path
 
@@ -159,6 +168,7 @@ def translate(
     from_lang: str = "en",
     verified_only: bool = False,  # False allows PEER_REVIEWED historical data; set True for elder-confirmed only
     db_path: Optional[Union[str, Path]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> List[TranslationMatch]:
     """
     Translates a word or concept from a source language INTO KARBI.
@@ -169,182 +179,209 @@ def translate(
         verified_only: If True, only returns entries verified by registered authorities.
                        If False, returns all authentic sourced entries (including PEER_REVIEWED).
         db_path: Optional custom path to the compiled SQLite database.
+        conn: Optional active sqlite3.Connection to reuse for batch operations.
 
     Returns:
         List of TranslationMatch objects with full Karbi linguistic and citation details.
     """
-    query = text.strip()
+    if text is None or not isinstance(text, str):
+        return []
+    query = unicodedata.normalize("NFC", text.strip())
     if not query:
         return []
 
+    if from_lang is None or not isinstance(from_lang, str):
+        return []
     lang_code = from_lang.lower().strip()
-    target_db = ensure_database_ready(db_path)
-    conn = get_db_connection(target_db)
-    cur = conn.cursor()
+    if lang_code not in SUPPORTED_LANGUAGES:
+        return []
 
-    matches: List[TranslationMatch] = []
-    seen_entry_ids = set()
+    should_close = False
+    if conn is None:
+        target_db = ensure_database_ready(db_path)
+        conn = get_db_connection(target_db)
+        should_close = True
 
-    # 1. Exact Match against the Multilingual Translations Index
-    status_filter = "AND status != 'AI_CANDIDATE'"
-    exact_sql = f"""
-        SELECT entry_id, sense_id, lemma, part_of_speech, query_term, status
-        FROM translations_index
-        WHERE from_lang = ? AND query_term = ? COLLATE NOCASE
-        {status_filter}
-    """
-    cur.execute(exact_sql, (lang_code, query))
-    rows = cur.fetchall()
+    try:
+        cur = conn.cursor()
 
-    for row in rows:
-        eid = row["entry_id"]
-        seen_entry_ids.add(eid)
+        matches: List[TranslationMatch] = []
+        seen_entry_ids = set()
 
-        # Retrieve full entry details
-        entry_cur = conn.cursor()
-        entry_cur.execute("SELECT raw_json FROM lexicon_entries WHERE entry_id = ?", (eid,))
-        e_row = entry_cur.fetchone()
-        if not e_row:
-            continue
-
-        raw = json.loads(e_row["raw_json"])
-        senses = raw.get("senses", [])
-        matched_sense = next((s for s in senses if s.get("sense_id") == row["sense_id"]), senses[0] if senses else {})
-
-        # Determine true gloss verification
-        is_verified, gloss_status = _determine_gloss_verification(
-            matched_sense, lang_code, row["query_term"], raw.get("status", row["status"])
-        )
-        if verified_only and not is_verified:
-            continue
-
-        # Extract citation details from all recorded evidence records
-        citations: List[str] = []
-        evs = raw.get("provenance", {}).get("evidence_records", [])
-        for ev in evs:
-            if not isinstance(ev, dict):
-                continue
-            sid = ev.get("source_id")
-            locator = ev.get("locator", "")
-            if sid:
-                src_cur = conn.cursor()
-                src_cur.execute("SELECT title FROM sources WHERE source_id = ?", (sid,))
-                src_row = src_cur.fetchone()
-                if src_row and src_row["title"]:
-                    title = src_row["title"]
-                    c_str = f"{title} ({locator})" if locator else title
-                else:
-                    c_str = f"{sid} ({locator})" if locator else sid
-                if c_str not in citations:
-                    citations.append(c_str)
-
-        citation = "; ".join(citations) if citations else None
-
-        matches.append(
-            TranslationMatch(
-                source_query=query,
-                source_language=lang_code,
-                karbi_lemma=raw.get("headword", {}).get("lemma", row["lemma"]),
-                part_of_speech=matched_sense.get("part_of_speech", row["part_of_speech"]),
-                matched_meaning=row["query_term"],
-                all_definitions=matched_sense.get("definitions", {}),
-                status=gloss_status,
-                entry_status=raw.get("status", row["status"]),
-                is_verified=is_verified,
-                phonetics_ipa=raw.get("phonetics", {}).get("ipa"),
-                examples=matched_sense.get("examples", []),
-                source_citation=citation,
-                source_citations=citations,
-                cultural_notes=matched_sense.get("cultural_metadata", {}).get("cultural_notes"),
-                dialect=raw.get("dialect", {}).get("primary_variety", "rongkhang"),
-            )
-        )
-
-    # 2. Contextual Full-Text Search Match (if no exact matches or for deeper phrase search)
-    if not matches:
-        def_col_map = {"en": "def_en", "hi": "def_hi", "as": "def_as", "bn": "def_bn"}
-        target_col = def_col_map.get(lang_code, "def_en")
-
-        fts_sql = f"""
-            SELECT entry_id, lemma
-            FROM fts_lexicon
-            WHERE {target_col} MATCH ?
-            LIMIT 10
+        # 1. Exact Match against the Multilingual Translations Index
+        status_filter = "AND status != 'AI_CANDIDATE'"
+        exact_sql = f"""
+            SELECT entry_id, sense_id, lemma, part_of_speech, query_term, status
+            FROM translations_index
+            WHERE from_lang = ? AND query_term = ? COLLATE NOCASE
+            {status_filter}
         """
-        try:
-            # Escape query for FTS5 (escape double quotes by doubling them)
-            escaped_query = query.replace('"', '""')
-            safe_query = f'"{escaped_query}"'
-            cur.execute(fts_sql, (safe_query,))
-            fts_rows = cur.fetchall()
+        cur.execute(exact_sql, (lang_code, query))
+        rows = cur.fetchall()
 
-            for f_row in fts_rows:
-                eid = f_row["entry_id"]
-                if eid in seen_entry_ids:
+        if not rows:
+            cleaned_query = re.sub(r"^[^\w]+|[^\w]+$", "", query)
+            if cleaned_query and cleaned_query != query:
+                cur.execute(exact_sql, (lang_code, cleaned_query))
+                rows = cur.fetchall()
+
+        for row in rows:
+            eid = row["entry_id"]
+            seen_entry_ids.add(eid)
+
+            # Retrieve full entry details
+            entry_cur = conn.cursor()
+            entry_cur.execute("SELECT raw_json FROM lexicon_entries WHERE entry_id = ?", (eid,))
+            e_row = entry_cur.fetchone()
+            if not e_row:
+                continue
+
+            raw = json.loads(e_row["raw_json"])
+            senses = raw.get("senses", [])
+            matched_sense = next((s for s in senses if s.get("sense_id") == row["sense_id"]), senses[0] if senses else {})
+
+            # Determine true gloss verification
+            is_verified, gloss_status = _determine_gloss_verification(
+                matched_sense, lang_code, row["query_term"], raw.get("status", row["status"])
+            )
+            if verified_only and not is_verified:
+                continue
+
+            # Extract citation details from all recorded evidence records
+            citations: List[str] = []
+            evs = raw.get("provenance", {}).get("evidence_records", [])
+            for ev in evs:
+                if not isinstance(ev, dict):
                     continue
+                sid = ev.get("source_id")
+                locator = ev.get("locator", "")
+                if sid:
+                    src_cur = conn.cursor()
+                    src_cur.execute("SELECT title FROM sources WHERE source_id = ?", (sid,))
+                    src_row = src_cur.fetchone()
+                    if src_row and src_row["title"]:
+                        title = src_row["title"]
+                        c_str = f"{title} ({locator})" if locator else title
+                    else:
+                        c_str = f"{sid} ({locator})" if locator else sid
+                    if c_str not in citations:
+                        citations.append(c_str)
 
-                entry_cur = conn.cursor()
-                entry_cur.execute("SELECT raw_json, status FROM lexicon_entries WHERE entry_id = ?", (eid,))
-                e_row = entry_cur.fetchone()
-                if not e_row:
-                    continue
+            citation = "; ".join(citations) if citations else None
 
-                if e_row["status"] == "AI_CANDIDATE":
-                    continue
-
-                raw = json.loads(e_row["raw_json"])
-                senses = raw.get("senses", [])
-                sense = senses[0] if senses else {}
-
-                is_verified, gloss_status = _determine_gloss_verification(
-                    sense, lang_code, query, e_row["status"]
+            matches.append(
+                TranslationMatch(
+                    source_query=query,
+                    source_language=lang_code,
+                    karbi_lemma=raw.get("headword", {}).get("lemma", row["lemma"]),
+                    part_of_speech=matched_sense.get("part_of_speech", row["part_of_speech"]),
+                    matched_meaning=row["query_term"],
+                    all_definitions=matched_sense.get("definitions", {}),
+                    status=gloss_status,
+                    entry_status=raw.get("status", row["status"]),
+                    is_verified=is_verified,
+                    phonetics_ipa=raw.get("phonetics", {}).get("ipa"),
+                    examples=matched_sense.get("examples", []),
+                    source_citation=citation,
+                    source_citations=citations,
+                    cultural_notes=matched_sense.get("cultural_metadata", {}).get("cultural_notes"),
+                    dialect=raw.get("dialect", {}).get("primary_variety", "rongkhang"),
+                    entry_id=eid,
                 )
-                if verified_only and not is_verified:
-                    continue
+            )
 
-                # Extract citation details for FTS match
-                fts_citations: List[str] = []
-                for ev in raw.get("provenance", {}).get("evidence_records", []):
-                    if not isinstance(ev, dict):
-                        continue
-                    sid = ev.get("source_id")
-                    locator = ev.get("locator", "")
-                    if sid:
-                        src_cur = conn.cursor()
-                        src_cur.execute("SELECT title FROM sources WHERE source_id = ?", (sid,))
-                        src_row = src_cur.fetchone()
-                        if src_row and src_row["title"]:
-                            title = src_row["title"]
-                            c_str = f"{title} ({locator})" if locator else title
-                        else:
-                            c_str = f"{sid} ({locator})" if locator else sid
-                        if c_str not in fts_citations:
-                            fts_citations.append(c_str)
+        # 2. Contextual Full-Text Search Match (if no exact matches or for deeper phrase search)
+        if not matches:
+            def_col_map = {"en": "def_en", "hi": "def_hi", "as": "def_as", "bn": "def_bn"}
+            target_col = def_col_map.get(lang_code)
 
-                fts_citation = "; ".join(fts_citations) if fts_citations else None
+            if target_col is not None:
+                fts_sql = f"""
+                    SELECT entry_id, lemma
+                    FROM fts_lexicon
+                    WHERE {target_col} MATCH ?
+                    LIMIT 10
+                """
+                try:
+                    # Escape query for FTS5 (escape double quotes by doubling them)
+                    escaped_query = query.replace('"', '""')
+                    safe_query = f'"{escaped_query}"'
+                    cur.execute(fts_sql, (safe_query,))
+                    fts_rows = cur.fetchall()
 
-                matches.append(
-                    TranslationMatch(
-                        source_query=query,
-                        source_language=lang_code,
-                        karbi_lemma=raw.get("headword", {}).get("lemma", f_row["lemma"]),
-                        part_of_speech=sense.get("part_of_speech", ""),
-                        matched_meaning=f"Full-text match in {lang_code} definitions",
-                        all_definitions=sense.get("definitions", {}),
-                        status=gloss_status,
-                        entry_status=e_row["status"],
-                        is_verified=is_verified,
-                        phonetics_ipa=raw.get("phonetics", {}).get("ipa"),
-                        examples=sense.get("examples", []),
-                        source_citation=fts_citation,
-                        source_citations=fts_citations,
-                        dialect=raw.get("dialect", {}).get("primary_variety", "rongkhang"),
-                    )
-                )
-        except sqlite3.OperationalError:
-            pass  # FTS query syntax fallback
+                    for f_row in fts_rows:
+                        eid = f_row["entry_id"]
+                        if eid in seen_entry_ids:
+                            continue
 
-    conn.close()
+                        entry_cur = conn.cursor()
+                        entry_cur.execute("SELECT raw_json, status FROM lexicon_entries WHERE entry_id = ?", (eid,))
+                        e_row = entry_cur.fetchone()
+                        if not e_row:
+                            continue
+
+                        if e_row["status"] == "AI_CANDIDATE":
+                            continue
+
+                        raw = json.loads(e_row["raw_json"])
+                        senses = raw.get("senses", [])
+                        sense = senses[0] if senses else {}
+
+                        is_verified, gloss_status = _determine_gloss_verification(
+                            sense, lang_code, query, e_row["status"]
+                        )
+                        if verified_only and not is_verified:
+                            continue
+
+                        # Extract citation details for FTS match
+                        fts_citations: List[str] = []
+                        for ev in raw.get("provenance", {}).get("evidence_records", []):
+                            if not isinstance(ev, dict):
+                                continue
+                            sid = ev.get("source_id")
+                            locator = ev.get("locator", "")
+                            if sid:
+                                src_cur = conn.cursor()
+                                src_cur.execute("SELECT title FROM sources WHERE source_id = ?", (sid,))
+                                src_row = src_cur.fetchone()
+                                if src_row and src_row["title"]:
+                                    title = src_row["title"]
+                                    c_str = f"{title} ({locator})" if locator else title
+                                else:
+                                    c_str = f"{sid} ({locator})" if locator else sid
+                                if c_str not in fts_citations:
+                                    fts_citations.append(c_str)
+
+                        fts_citation = "; ".join(fts_citations) if fts_citations else None
+
+                        matches.append(
+                            TranslationMatch(
+                                source_query=query,
+                                source_language=lang_code,
+                                karbi_lemma=raw.get("headword", {}).get("lemma", f_row["lemma"]),
+                                part_of_speech=sense.get("part_of_speech", ""),
+                                matched_meaning=f"Full-text match in {lang_code} definitions",
+                                all_definitions=sense.get("definitions", {}),
+                                status=gloss_status,
+                                entry_status=e_row["status"],
+                                is_verified=is_verified,
+                                phonetics_ipa=raw.get("phonetics", {}).get("ipa"),
+                                examples=sense.get("examples", []),
+                                source_citation=fts_citation,
+                                source_citations=fts_citations,
+                                dialect=raw.get("dialect", {}).get("primary_variety", "rongkhang"),
+                                entry_id=eid,
+                            )
+                        )
+                except sqlite3.OperationalError:
+                    pass  # FTS query syntax fallback
+
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
     return matches
 
 
@@ -353,21 +390,36 @@ def batch_translate(
     from_lang: str = "en",
     verified_only: bool = False,
     db_path: Optional[Union[str, Path]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> Dict[str, List[TranslationMatch]]:
     """
-    Translates multiple words or concepts into Karbi.
+    Translates multiple words or concepts into Karbi, reusing a single database connection.
 
     Args:
         queries: Iterable of words or concepts to translate.
         from_lang: Source language code ('en', 'hi', 'as', 'bn').
         verified_only: If True, only returns verified entries.
         db_path: Optional custom path to SQLite database.
+        conn: Optional active sqlite3.Connection to reuse.
 
     Returns:
         Dictionary mapping each query string to its list of TranslationMatch objects.
     """
-    return {
-        q: translate(q, from_lang=from_lang, verified_only=verified_only, db_path=db_path)
-        for q in queries
-    }
+    should_close = False
+    if conn is None:
+        target_db = ensure_database_ready(db_path)
+        conn = get_db_connection(target_db)
+        should_close = True
+
+    try:
+        return {
+            q: translate(q, from_lang=from_lang, verified_only=verified_only, db_path=db_path, conn=conn)
+            for q in queries
+        }
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
 

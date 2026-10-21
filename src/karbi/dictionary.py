@@ -8,6 +8,9 @@ and comprehensive search across definitions and phonetic notations.
 
 from __future__ import annotations
 import json
+import re
+import sqlite3
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -90,66 +93,8 @@ class DictionaryEntry:
         }
 
 
-def lookup(
-    karbi_word: str,
-    db_path: Optional[Union[str, Path]] = None,
-) -> Optional[DictionaryEntry]:
-    """
-    Looks up a Karbi headword or spelling variant.
-
-    Args:
-        karbi_word: The Karbi word to search for (e.g. 'arlèng', 'hem', 'làng').
-        db_path: Optional custom path to compiled SQLite database.
-
-    Returns:
-        DictionaryEntry object if found, or None.
-    """
-    word = karbi_word.strip()
-    if not word:
-        return None
-
-    target_db = ensure_database_ready(db_path)
-    conn = get_db_connection(target_db)
-    cur = conn.cursor()
-
-    cur.execute("SELECT raw_json FROM lexicon_entries WHERE lemma = ? COLLATE NOCASE", (word,))
-    row = cur.fetchone()
-
-    # If not found directly, check FTS5 for lemma variants
-    if not row:
-        safe_word = word.replace('"', '""')
-        cur.execute(
-            """
-            SELECT e.raw_json 
-            FROM fts_lexicon f 
-            JOIN lexicon_entries e ON f.entry_id = e.entry_id 
-            WHERE f.lemma MATCH ? 
-            LIMIT 1
-            """,
-            (f'"{safe_word}"',),
-        )
-        row = cur.fetchone()
-
-    # If not found directly or via FTS, check spelling variants in lexicon entries
-    if not row:
-        cur.execute("SELECT raw_json FROM lexicon_entries")
-        for candidate_row in cur.fetchall():
-            c_raw = json.loads(candidate_row["raw_json"])
-            variants = c_raw.get("spelling_variants", [])
-            if any(
-                isinstance(v, dict) and v.get("text", "").strip().lower() == word.lower()
-                for v in variants
-            ):
-                row = candidate_row
-                break
-
-    if not row:
-        conn.close()
-        return None
-
-    raw = json.loads(row["raw_json"])
-
-    # Extract citations from all recorded evidence records
+def _raw_to_entry(raw: Dict[str, Any], cur: sqlite3.Cursor) -> DictionaryEntry:
+    """Converts a raw JSON lexicon entry into a fully populated DictionaryEntry."""
     citations: List[str] = []
     evs = raw.get("provenance", {}).get("evidence_records", [])
     for ev in evs:
@@ -170,8 +115,6 @@ def lookup(
 
     citation = "; ".join(citations) if citations else None
 
-    conn.close()
-
     return DictionaryEntry(
         entry_id=raw.get("id", ""),
         lemma=raw.get("headword", {}).get("lemma", ""),
@@ -188,19 +131,163 @@ def lookup(
     )
 
 
+def lookup_all(
+    karbi_word: str,
+    db_path: Optional[Union[str, Path]] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> List[DictionaryEntry]:
+    """
+    Looks up all matching Karbi headwords and spelling variants (including homonyms).
+
+    Args:
+        karbi_word: The Karbi word to search for (e.g. 'arlèng', 'hem', 'cho').
+        db_path: Optional custom path to compiled SQLite database.
+        conn: Optional active sqlite3.Connection to reuse for batch operations.
+
+    Returns:
+        List of DictionaryEntry objects matching the query.
+    """
+    if karbi_word is None or not isinstance(karbi_word, str):
+        return []
+    word = unicodedata.normalize("NFC", karbi_word.strip())
+    if not word:
+        return []
+
+    should_close = False
+    if conn is None:
+        target_db = ensure_database_ready(db_path)
+        conn = get_db_connection(target_db)
+        should_close = True
+
+    try:
+        cur = conn.cursor()
+        entries: List[DictionaryEntry] = []
+        seen_ids: set[str] = set()
+
+        # 1. Direct match on lemma
+        cur.execute("SELECT raw_json FROM lexicon_entries WHERE lemma = ? COLLATE NOCASE", (word,))
+        for row in cur.fetchall():
+            raw = json.loads(row["raw_json"])
+            eid = raw.get("id", "")
+            if eid not in seen_ids:
+                seen_ids.add(eid)
+                entries.append(_raw_to_entry(raw, cur))
+
+        # Fallback to stripped punctuation if initial direct lookup yielded nothing
+        if not entries:
+            cleaned_word = re.sub(r"^[^\w]+|[^\w]+$", "", word)
+            if cleaned_word and cleaned_word != word:
+                cur.execute("SELECT raw_json FROM lexicon_entries WHERE lemma = ? COLLATE NOCASE", (cleaned_word,))
+                for row in cur.fetchall():
+                    raw = json.loads(row["raw_json"])
+                    eid = raw.get("id", "")
+                    if eid not in seen_ids:
+                        seen_ids.add(eid)
+                        entries.append(_raw_to_entry(raw, cur))
+
+        # 2. Check FTS5 for lemma variants if no exact match
+        if not entries:
+            safe_word = word.replace('"', '""')
+            cur.execute(
+                """
+                SELECT e.raw_json
+                FROM fts_lexicon f
+                JOIN lexicon_entries e ON f.entry_id = e.entry_id
+                WHERE f.lemma MATCH ?
+                LIMIT 10
+                """,
+                (f'"{safe_word}"',),
+            )
+            for row in cur.fetchall():
+                raw = json.loads(row["raw_json"])
+                eid = raw.get("id", "")
+                if eid not in seen_ids:
+                    seen_ids.add(eid)
+                    entries.append(_raw_to_entry(raw, cur))
+
+        # 3. Check spelling variants in lexicon entries
+        if not entries:
+            search_target = word.lower()
+            cleaned_target = re.sub(r"^[^\w]+|[^\w]+$", "", word).lower()
+            cur.execute("SELECT raw_json FROM lexicon_entries")
+            for candidate_row in cur.fetchall():
+                c_raw = json.loads(candidate_row["raw_json"])
+                variants = c_raw.get("spelling_variants", [])
+                for v in variants:
+                    v_text = (v.get("text", "") if isinstance(v, dict) else str(v)).strip().lower()
+                    if v_text in (search_target, cleaned_target) and v_text:
+                        eid = c_raw.get("id", "")
+                        if eid not in seen_ids:
+                            seen_ids.add(eid)
+                            entries.append(_raw_to_entry(c_raw, cur))
+                        break
+
+        return entries
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def lookup(
+    karbi_word: str,
+    dialect: Optional[str] = None,
+    db_path: Optional[Union[str, Path]] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[DictionaryEntry]:
+    """
+    Looks up a Karbi headword or spelling variant.
+
+    Args:
+        karbi_word: The Karbi word to search for (e.g. 'arlèng', 'hem', 'làng').
+        dialect: Optional dialect filter (e.g. 'rongkhang').
+        db_path: Optional custom path to compiled SQLite database.
+        conn: Optional active sqlite3.Connection to reuse.
+
+    Returns:
+        DictionaryEntry object if found, or None.
+    """
+    entries = lookup_all(karbi_word, db_path=db_path, conn=conn)
+    if not entries:
+        return None
+    if dialect:
+        dialect_matches = [e for e in entries if e.dialect == dialect]
+        if dialect_matches:
+            return dialect_matches[0]
+    return entries[0]
+
+
 def batch_lookup(
     karbi_words: Sequence[str],
     db_path: Optional[Union[str, Path]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> Dict[str, Optional[DictionaryEntry]]:
     """
-    Performs batch lookup for multiple Karbi headwords or spelling variants.
+    Performs batch lookup for multiple Karbi headwords or spelling variants,
+    reusing a single database connection.
 
     Args:
         karbi_words: Iterable of Karbi words to look up.
         db_path: Optional custom path to compiled SQLite database.
+        conn: Optional active sqlite3.Connection to reuse.
 
     Returns:
         Dictionary mapping each input word to its DictionaryEntry, or None if not found.
     """
-    return {word: lookup(word, db_path=db_path) for word in karbi_words}
+    should_close = False
+    if conn is None:
+        target_db = ensure_database_ready(db_path)
+        conn = get_db_connection(target_db)
+        should_close = True
+
+    try:
+        return {word: lookup(word, db_path=db_path, conn=conn) for word in karbi_words}
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
 

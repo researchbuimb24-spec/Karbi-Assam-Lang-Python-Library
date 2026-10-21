@@ -58,6 +58,13 @@ class TestAlphabetAndGrammar(unittest.TestCase):
         # 1 tree -> e-ròng
         self.assertEqual(karbi.count_with_classifier(1, "trees"), "e-ròng")
 
+        # None and out of range edge cases
+        self.assertIsNone(karbi.count_with_classifier(None, "animals"))
+        self.assertIsNone(karbi.count_with_classifier(1, None))
+        self.assertIsNone(karbi.count_with_classifier(0, "animals"))
+        self.assertIsNone(karbi.count_with_classifier(11, "animals"))
+        self.assertIsNone(karbi.count_with_classifier(1, "unknown_category_xyz"))
+
     def test_cardinals_and_pronouns(self):
         """Cardinals and pronouns match historical documentation."""
         cardinals = karbi.get_cardinals()

@@ -112,6 +112,11 @@ def count_with_classifier(number: int, category: str) -> Optional[str]:
         number: Integer between 1 and 10.
         category: 'persons', 'animals', 'trees', 'houses', 'flat', 'round', or 'ornaments'.
     """
+    if category is None or not isinstance(category, str):
+        return None
+    if number is None or not isinstance(number, int) or not (1 <= number <= 10):
+        return None
+
     key_map = {
         "persons": "bang",
         "person": "bang",
@@ -125,7 +130,7 @@ def count_with_classifier(number: int, category: str) -> Optional[str]:
         "round": "pum",
         "ornaments": "hong",
     }
-    ckey = key_map.get(category.lower())
+    ckey = key_map.get(category.strip().lower())
     if not ckey or ckey not in CLASSIFIERS:
         return None
 

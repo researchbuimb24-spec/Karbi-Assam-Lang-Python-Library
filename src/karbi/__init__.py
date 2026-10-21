@@ -34,13 +34,14 @@ from karbi.api import (
     validate_dataset,
 )
 from karbi.cli import main as cli_main
-from karbi.dictionary import DictionaryEntry, lookup
+from karbi.dictionary import DictionaryEntry, lookup, lookup_all
 from karbi.grammar import (
     count_with_classifier,
     get_cardinals,
     get_classifiers,
     get_pronouns,
 )
+from karbi.core.session import KarbiSession, session
 from karbi.translator import (
     TranslationMatch,
     get_supported_languages,
@@ -53,6 +54,8 @@ __all__ = [
     "__version__",
     "cli_main",
     # High-Level Unified Python API
+    "session",
+    "KarbiSession",
     "search",
     "batch_search",
     "batch_lookup",
@@ -66,6 +69,7 @@ __all__ = [
     "TranslationMatch",
     # Karbi Dictionary
     "lookup",
+    "lookup_all",
     "DictionaryEntry",
     # Alphabet and Phonetics
     "get_vowels",

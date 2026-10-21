@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from karbi.core.dataset import DatasetValidationResult, validate_dataset_files
 from karbi.core.db import DEFAULT_DB_PATH
 from karbi.core.resources import get_resource_paths
-from karbi.dictionary import DictionaryEntry, lookup
+from karbi.dictionary import DictionaryEntry, lookup, lookup_all
 from karbi.translator import (
     SUPPORTED_LANGUAGES,
     TranslationMatch,
@@ -220,8 +220,8 @@ def run_lookup(
     Performs headword lookup in Karbi dictionary.
     Returns 0 if found, 1 if not found.
     """
-    entry = lookup(karbi_word, db_path=db_path)
-    if not entry:
+    entries = lookup_all(karbi_word, db_path=db_path)
+    if not entries:
         if as_json:
             print(json.dumps({"found": False, "query": karbi_word, "results": []}))
         else:
@@ -232,24 +232,32 @@ def run_lookup(
         return 1
 
     if as_json:
+        entry_dicts = [
+            {
+                "entry_id": e.entry_id,
+                "lemma": e.lemma,
+                "script": e.script,
+                "dialect": e.dialect,
+                "status": e.status,
+                "phonetics_ipa": e.phonetics_ipa,
+                "senses": e.senses,
+                "spelling_variants": e.spelling_variants,
+                "source_citations": e.source_citations,
+            }
+            for e in entries
+        ]
         data = {
             "found": True,
             "query": karbi_word,
-            "entry": {
-                "entry_id": entry.entry_id,
-                "lemma": entry.lemma,
-                "script": entry.script,
-                "dialect": entry.dialect,
-                "status": entry.status,
-                "phonetics_ipa": entry.phonetics_ipa,
-                "senses": entry.senses,
-                "spelling_variants": entry.spelling_variants,
-                "source_citations": entry.source_citations,
-            },
+            "entry": entry_dicts[0],
+            "entries": entry_dicts,
         }
         print(json.dumps(data, indent=2, ensure_ascii=False))
     else:
-        print(format_dictionary_entry(entry))
+        for idx, e in enumerate(entries):
+            if idx > 0:
+                print("\n" + "-" * 70 + "\n")
+            print(format_dictionary_entry(e))
 
     return 0
 
