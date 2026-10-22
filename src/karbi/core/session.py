@@ -21,8 +21,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from karbi.core.db import get_db_connection, get_default_db_path
-from karbi.translator import ensure_database_ready, TranslationMatch, translate
+from karbi.core.db import ensure_database_ready, get_db_connection, get_default_db_path
+from karbi.translator import TranslationMatch, translate
 from karbi.dictionary import DictionaryEntry, lookup_all, lookup
 from karbi.api import SearchResult, search
 

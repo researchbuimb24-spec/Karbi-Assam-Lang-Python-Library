@@ -56,9 +56,18 @@ def sync_authoritative_data_to_resources() -> bool:
     lex_target.parent.mkdir(parents=True, exist_ok=True)
     src_target.parent.mkdir(parents=True, exist_ok=True)
 
-    # Copy only if target is missing or content differs
+    # Copy only if target is missing, metadata differs, or content differs
     for src, dst in [(repo_lex, lex_target), (repo_src, src_target)]:
-        if not dst.exists() or dst.stat().st_size != src.stat().st_size or dst.stat().st_mtime < src.stat().st_mtime:
+        needs_copy = False
+        if not dst.exists():
+            needs_copy = True
+        elif dst.stat().st_size != src.stat().st_size or dst.stat().st_mtime < src.stat().st_mtime:
+            needs_copy = True
+        elif dst.stat().st_mtime != src.stat().st_mtime:
+            if dst.read_bytes() != src.read_bytes():
+                needs_copy = True
+
+        if needs_copy:
             shutil.copy2(src, dst)
 
     return True

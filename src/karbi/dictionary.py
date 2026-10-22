@@ -15,8 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-from karbi.core.db import DEFAULT_DB_PATH, get_db_connection
-from karbi.translator import ensure_database_ready
+from karbi.core.db import DEFAULT_DB_PATH, ensure_database_ready, get_db_connection
 
 
 @dataclass
@@ -205,7 +204,30 @@ def lookup_all(
                     seen_ids.add(eid)
                     entries.append(_raw_to_entry(raw, cur))
 
-        # 3. Check spelling variants in lexicon entries
+        # 3. Check spelling variants using indexed table first
+        if not entries:
+            search_target = word.lower()
+            cleaned_target = re.sub(r"^[^\w]+|[^\w]+$", "", word).lower()
+            try:
+                cur.execute(
+                    """
+                    SELECT e.raw_json
+                    FROM spelling_variants_index v
+                    JOIN lexicon_entries e ON v.entry_id = e.entry_id
+                    WHERE v.variant_term IN (?, ?) COLLATE NOCASE
+                    """,
+                    (search_target, cleaned_target),
+                )
+                for row in cur.fetchall():
+                    raw = json.loads(row["raw_json"])
+                    eid = raw.get("id", "")
+                    if eid not in seen_ids:
+                        seen_ids.add(eid)
+                        entries.append(_raw_to_entry(raw, cur))
+            except Exception:
+                pass
+
+        # 4. Fallback table scan if index is missing or yielded nothing
         if not entries:
             search_target = word.lower()
             cleaned_target = re.sub(r"^[^\w]+|[^\w]+$", "", word).lower()

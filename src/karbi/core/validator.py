@@ -9,6 +9,10 @@ authorizations, test-fixture rejection, and sense-level review consistency.
 from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import unicodedata
+
+# Supported translation definition language codes
+SUPPORTED_DEFINITION_LANGUAGES = {"en", "hi", "as", "bn"}
 
 from karbi.core.models import (
     AccessLevel,
@@ -162,6 +166,10 @@ class LexiconValidator:
         # 4. Headword Validation
         if not e.headword or not e.headword.lemma or not e.headword.lemma.strip():
             errors.append(f"Entry '{e.id}': headword.lemma cannot be empty.")
+        elif e.headword.lemma != unicodedata.normalize("NFC", e.headword.lemma):
+            errors.append(
+                f"Entry '{e.id}': headword lemma '{e.headword.lemma}' must be in Unicode NFC normalized form."
+            )
 
         # 5. Dialect Validation
         if not e.dialect or not e.dialect.primary_variety or not e.dialect.primary_variety.strip():
@@ -189,6 +197,12 @@ class LexiconValidator:
                     )
 
         # 8. Provenance Evidence Records Validation (across all statuses)
+        if e.status == Status.SOURCE_ATTESTED.value:
+            if not e.provenance or not e.provenance.evidence_records or len(e.provenance.evidence_records) == 0:
+                errors.append(
+                    f"Entry '{e.id}': marked as SOURCE_ATTESTED but has 0 evidence records."
+                )
+
         if e.provenance and e.provenance.evidence_records:
             for ev in e.provenance.evidence_records:
                 if not ev.source_id or not ev.source_id.strip():
@@ -196,6 +210,10 @@ class LexiconValidator:
                 elif ev.source_id not in self.sources_registry:
                     errors.append(
                         f"Entry '{e.id}': evidence record references unregistered source_id '{ev.source_id}'."
+                    )
+                if not ev.locator or not str(ev.locator).strip():
+                    errors.append(
+                        f"Entry '{e.id}': evidence record for source '{ev.source_id}' must provide a locator (page/reference)."
                     )
 
         # 9. Strict Verification Requirements (for VERIFIED status)
@@ -220,6 +238,14 @@ class LexiconValidator:
         if not sense.definitions or len(sense.definitions) == 0:
             errors.append(f"Entry '{entry_id}', Sense '{sense.sense_id}': definitions cannot be empty.")
         else:
+            # Check supported definition languages
+            for lang in sense.definitions:
+                if lang not in SUPPORTED_DEFINITION_LANGUAGES:
+                    errors.append(
+                        f"Entry '{entry_id}', Sense '{sense.sense_id}': unsupported language code '{lang}' in definitions. "
+                        f"Allowed: {sorted(list(SUPPORTED_DEFINITION_LANGUAGES))}"
+                    )
+
             # Definitions may be:
             #   - List[str]: plain gloss strings
             #   - List[Dict]: dicts with 'text' key (and optional 'verified' flag)
@@ -232,6 +258,11 @@ class LexiconValidator:
                         has_valid_def = True
                     elif isinstance(d, dict) and d.get("text", "").strip():
                         has_valid_def = True
+                        if parent_status in (Status.DRAFT.value, Status.AI_CANDIDATE.value, Status.IN_REVIEW.value) and d.get("verified") is True:
+                            errors.append(
+                                f"Entry '{entry_id}', Sense '{sense.sense_id}': contradictory verification state. "
+                                f"Entry has unvetted status '{parent_status}' but contains a gloss marked verified=True."
+                            )
             if not has_valid_def:
                 errors.append(
                     f"Entry '{entry_id}', Sense '{sense.sense_id}': definitions must contain at least one "

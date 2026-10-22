@@ -154,7 +154,20 @@ def init_db_schema(conn: sqlite3.Connection) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_lemma_lookup ON lexicon_entries(lemma);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_senses_entry ON senses(entry_id);")
 
-    # 5. Full-Text Search (FTS5) Virtual Table
+    # 5. Spelling Variants Index (Instant lookup for modern/alternative orthography)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS spelling_variants_index (
+            variant_term TEXT NOT NULL COLLATE NOCASE,
+            entry_id TEXT NOT NULL,
+            lemma TEXT NOT NULL,
+            context TEXT,
+            FOREIGN KEY(entry_id) REFERENCES lexicon_entries(entry_id) ON DELETE CASCADE
+        );
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_variant_lookup ON spelling_variants_index(variant_term);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_variant_entry ON spelling_variants_index(entry_id);")
+
+    # 6. Full-Text Search (FTS5) Virtual Table
     cur.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_lexicon USING fts5(
             entry_id UNINDEXED,
@@ -247,6 +260,20 @@ def compile_database(
             )
             entries_count += 1
 
+            # Ingest Spelling Variants for Fast Indexed Lookup
+            for v in e.get("spelling_variants", []):
+                v_text = (v.get("text", "") if isinstance(v, dict) else str(v)).strip()
+                v_ctx = v.get("dialect_or_context", "") if isinstance(v, dict) else ""
+                if v_text:
+                    cur.execute(
+                        """
+                        INSERT INTO spelling_variants_index (
+                            variant_term, entry_id, lemma, context
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (unicodedata.normalize("NFC", v_text), eid, lemma, v_ctx),
+                    )
+
             # Ingest Senses and Index Reverse Translations
             senses = e.get("senses", [])
             for s in senses:
@@ -319,3 +346,73 @@ def compile_database(
     conn.commit()
     conn.close()
     return entries_count, sources_count
+
+
+def ensure_database_ready(db_path: Optional[Union[str, Path]] = None) -> Path:
+    """
+    Ensures the compiled SQLite database exists and is populated, compiling it if necessary or stale.
+
+    Validation checks:
+    - Verifies that input resource files exist and can be discovered.
+    - Verifies database mtime against resource files mtime.
+    - Verifies that all expected relational tables and search virtual tables exist.
+    - Verifies non-empty record count.
+    - Automatically recompiles on corruption, missing tables, or stale data.
+    """
+    from karbi.core.resources import get_resource_paths
+
+    target_path = Path(db_path) if db_path is not None else get_default_db_path()
+    lex_files, src_files = get_resource_paths()
+
+    if target_path.exists():
+        conn = None
+        try:
+            db_mtime = target_path.stat().st_mtime
+            input_files = [f for f in lex_files + src_files if f.is_file()]
+            if not input_files:
+                raise FileNotFoundError("No input lexicon or source files found to build database.")
+
+            is_stale = any(f.stat().st_mtime > db_mtime for f in input_files)
+
+            if not is_stale:
+                conn = get_db_connection(target_path)
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")
+                existing_tables = {row[0] for row in cur.fetchall()}
+                required_tables = {
+                    "sources",
+                    "lexicon_entries",
+                    "senses",
+                    "translations_index",
+                    "spelling_variants_index",
+                    "fts_lexicon",
+                }
+                if required_tables.issubset(existing_tables):
+                    cur.execute("SELECT COUNT(*) FROM lexicon_entries")
+                    count = cur.fetchone()[0]
+                    if count > 0:
+                        return target_path
+        except Exception:
+            pass  # Recompile if corrupted, incomplete, missing tables, or stale
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    compile_database(lex_files, src_files, db_path=target_path)
+    return target_path
+
+
+__all__ = [
+    "DEFAULT_DB_PATH",
+    "SearchResult",
+    "compile_database",
+    "ensure_database_ready",
+    "get_db_connection",
+    "get_default_db_path",
+    "get_user_data_dir",
+    "init_db_schema",
+]

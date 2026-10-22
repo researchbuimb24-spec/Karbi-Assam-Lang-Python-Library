@@ -188,6 +188,27 @@ class TestPublicPythonAPI:
         assert results["hem"][0].karbi_lemma == "hèm"
         assert results["missing_word"] == []
 
+    def test_batch_search_verified_only(self):
+        """batch_search with verified_only=True excludes unverified matches."""
+        results = batch_search(["पानी", "আকাল"], verified_only=True)
+        assert results["पानी"] == []
+        assert results["আকাল"] == []
+
+        results_unfiltered = batch_search(["पानी", "আকাল"], verified_only=False)
+        assert len(results_unfiltered["पानी"]) >= 1
+        assert len(results_unfiltered["আকাল"]) >= 1
+
+    def test_validate_dataset_api_call(self):
+        """validate_dataset API function audits the default dataset successfully."""
+        from karbi import validate_dataset, DatasetValidationResult
+
+        result = validate_dataset()
+        assert isinstance(result, DatasetValidationResult)
+        assert result.is_valid is True
+        assert result.lexicon_entries_count == 481
+        assert result.sources_count == 4
+        assert len(result.errors) == 0
+
     def test_search_result_serialization(self):
         """SearchResult serializes cleanly into dictionary and JSON."""
         res = search("arlèng")[0]

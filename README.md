@@ -20,9 +20,14 @@ The `karbi` library provides a lightweight, zero-external-dependency Python inte
 
 ### Current Limitations
 * **Pre-Alpha Status (`0.1.0`):** The project is in active initial development.
-* **Lexicon Scope:** The current lexical database represents a curated core lexicon of 409 headwords based on historical, published literature (notably Edward Stack & Sir Charles Lyall's *The Mikirs*, 1908, and Rev. R. E. Neighbor's *A Vocabulary in English and Mikir*, 1878). It is not yet an exhaustive or complete dictionary of all contemporary Karbi vocabulary.
-* **Unverified Translation Glosses:** While English glosses are largely source-attested from published documentation, many corresponding Hindi, Assamese, and Bengali translations are unverified working glosses that await formal review and native speaker corroboration.
-* **Orthography:** Orthographic conventions in this library represent primary source attestations alongside common contemporary Roman-script representations. Ongoing orthographic standardization by literary bodies (such as *Karbi Lammet Amei*) is respected and will guide formal updates.
+* **Lexicon Scope:** The lexical database contains **481 historical source-attested headwords** (IDs `KB-LEX-0000001` through `KB-LEX-0000481`) with 100% citation coverage across primary historical sources: Edward Stack & Sir Charles Lyall's *The Mikirs* (1908, `SRC-PUB-00001`), Sir George Abraham Grierson's *Linguistic Survey of India*, Vol. III, Part II (1903, `SRC-PUB-00002`), Rev. R. E. Neighbor's *A Vocabulary in English and Mikir* (1878, `SRC-PUB-00003`), and Sardoka Perrin Kay & Edward Stack's *An English-Mikir Vocabulary* (1904, `SRC-PUB-00004`). In a reproducible second-pass audit of historical source evidence:
+  * **429 entries** are confirmed verbatim from source context (`CONFIRMED_FROM_SOURCE`).
+  * **51 entries** are partially confirmed under orthographic or morpho-syntactic variants (`PARTIALLY_CONFIRMED`).
+  * **1 entry** has an identified citation discrepancy (`KB-LEX-0000382`, `kāthē` vs. source printed `karle`/`karle-sarpo` on p. 88).
+  * **0 entries** are verified by native speakers (Current native-speaker verification count: 0).
+  * It provides an authentic, scholarly foundation rather than an exhaustive dictionary of contemporary spoken Karbi.
+* **Unverified Translation Glosses:** While English glosses are source-attested from published documentation, all corresponding Hindi, Assamese, and Bengali translations are unverified working glosses (414 total across the dataset: Hindi 152, Assamese 135, Bengali 127) that await formal review and native speaker corroboration. These are automatically excluded whenever `verified_only=True` is requested.
+* **Orthography & Colonial-Era Sourced Limitations:** Orthographic conventions in this library represent primary historical source attestations alongside common contemporary Roman-script representations. Colonial-era orthography and phonetic transcriptions (such as those in Stack & Lyall 1908 or Grierson 1903) reflect external missionary and administrative recording conventions of their era; they are distinct from ongoing orthographic standardization by contemporary Karbi literary bodies (such as *Karbi Lammet Amei*).
 * **Cultural Knowledge:** Folklore, rituals, and deity outlines in `karbi.culture` are preliminary summaries accompanied by cultural sensitivity guidelines and require further community consent and elder validation.
 
 ---
@@ -353,13 +358,25 @@ Attested records cite verifiable historical sources registered in `data/sources/
 
 Primary source IDs and exact page locators (e.g. `SRC-PUB-00001`, `p. 74, 80` or `SRC-PUB-00003`, `p. 5`) are stored in `data/sources/sources.jsonl` and embedded in `karbi.db`.
 
-### Unverified Translations
-In both the Python API and CLI output, unverified definitions are explicitly flagged (`[UNVERIFIED]` badge, `is_verified=False`). Users and researchers must not cite unverified candidate translations as verified Karbi language facts.
+### Historical Source Attestation vs. Independent Linguistic Verification
+A fundamental principle of this library is the distinction between **historical source attestation** and **independent linguistic/native-speaker verification**:
+* **Source Attestation:** Demonstrates that a lexical item, spelling, or gloss was printed in an identified historical or academic document (such as Stack & Lyall 1908 or Grierson 1903). In our second-pass audit, 429 of 481 entries were confirmed verbatim from source context, 51 were partially confirmed as orthographic/morphological variants, and 1 citation mismatch was identified (`KB-LEX-0000382`).
+* **Linguistic Verification:** Requires confirmation by contemporary native Karbi speakers, qualified language specialists, or recognized community organizations (such as *Karbi Lammet Amei*). **Currently, 0 entries possess native-speaker verification status.**
 
-### Community Review & Data Ethics
+### Unverified Indic Translations (414 Backlog)
+While the English definitions originate directly from the source texts, the Indic glosses (Hindi: 152, Assamese: 135, Bengali: 127; total 414) are provisional working candidate glosses.
+* In both Python API outputs and CLI tools, unverified glosses are strictly excluded whenever `verified_only=True` (or `--verified-only`) is specified.
+* Unverified entries are explicitly marked (`is_verified=False`, `gloss_provenance="unverified"`). Users and researchers must not cite unverified candidate translations as verified Karbi language facts.
+
+### Community Review & Submitting Corrections
 Linguistic and cultural documentation of indigenous communities requires ethical collaboration and respect for community ownership:
 * All vocabulary expansions, orthography decisions, and dialect notations are subject to ongoing review by native Karbi speakers and representative community bodies.
-* Folklore narratives and traditional cultural entries are governed by sensitivity markers and consent protocols.
+* Folklore narratives and traditional cultural entries in `karbi.culture` are governed by cultural sensitivity guidelines and consent protocols.
+* **How to submit corrections:** Contributors can submit evidence-backed corrections by providing:
+  1. The entry ID (e.g., `KB-LEX-0000382`).
+  2. The modern standard Karbi form and contemporary orthography.
+  3. Verifiable citation locator or recorded native speaker attribution.
+  4. Running `karbi validate` and `pytest` prior to submitting pull requests.
 
 ---
 

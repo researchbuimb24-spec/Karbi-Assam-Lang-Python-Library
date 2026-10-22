@@ -22,7 +22,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-from karbi.core.db import DEFAULT_DB_PATH, compile_database, get_db_connection, get_default_db_path
+from karbi.core.db import (
+    DEFAULT_DB_PATH,
+    compile_database,
+    ensure_database_ready,
+    get_db_connection,
+    get_default_db_path,
+)
 from karbi.core.resources import get_resource_paths
 
 # Discovered dataset paths (authoritative repo copies in dev, package resources in distribution)
@@ -124,38 +130,6 @@ def _determine_gloss_verification(
 
     return False, "unverified"
 
-
-def ensure_database_ready(db_path: Optional[Union[str, Path]] = None) -> Path:
-    """Ensures the compiled SQLite database exists and is populated, compiling it if necessary or stale."""
-    target_path = Path(db_path) if db_path is not None else get_default_db_path()
-    lex_files, src_files = get_resource_paths()
-
-    if target_path.exists():
-        conn = None
-        try:
-            db_mtime = target_path.stat().st_mtime
-            input_files = [f for f in lex_files + src_files if f.is_file()]
-            is_stale = any(f.stat().st_mtime > db_mtime for f in input_files)
-
-            if not is_stale:
-                conn = get_db_connection(target_path)
-                cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM lexicon_entries")
-                count = cur.fetchone()[0]
-                if count > 0:
-                    return target_path
-        except Exception:
-            pass  # Recompile if corrupted, empty, or stale
-        finally:
-            if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    compile_database(lex_files, src_files, db_path=target_path)
-    return target_path
 
 
 def get_supported_languages() -> Dict[str, Dict[str, Any]]:

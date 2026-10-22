@@ -447,6 +447,88 @@ class TestMultilingualTranslation(unittest.TestCase):
         self.assertIsNotNone(entry_orphan)
         self.assertEqual(entry_orphan.entry_id, "KB-LEX-0000409")
 
+    def test_grierson_and_stack_expansion_entries(self):
+        """Newly expanded source-attested entries from Grierson (1903) and Stack & Lyall (1908) resolve correctly."""
+        # 1. Grierson (1903) entries:
+        # phàk-alo (boar)
+        e_boar = karbi.lookup("phàk-alo")
+        self.assertIsNotNone(e_boar)
+        self.assertEqual(e_boar.entry_id, "KB-LEX-0000410")
+        self.assertEqual(e_boar.senses[0]["part_of_speech"], "noun")
+        self.assertIn("Linguistic Survey of India", e_boar.source_citation)
+        self.assertIn("p. 383", e_boar.source_citation)
+
+        # Look up by spelling variant without diacritics
+        v_boar = karbi.lookup("phak-alo")
+        self.assertIsNotNone(v_boar)
+        self.assertEqual(v_boar.lemma, "phàk-alo")
+
+        # English translation reverse lookup
+        trans_boar = karbi.translate("boar", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "phàk-alo" for m in trans_boar))
+
+        # kaphù (head)
+        e_head = karbi.lookup("kaphù")
+        self.assertIsNotNone(e_head)
+        self.assertEqual(e_head.entry_id, "KB-LEX-0000418")
+        trans_head = karbi.translate("skull", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "kaphù" for m in trans_head))
+
+        # kànghi (famine)
+        e_famine = karbi.lookup("kànghi")
+        self.assertIsNotNone(e_famine)
+        trans_famine = karbi.translate("famine", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "kànghi" for m in trans_famine))
+
+        # lūchè (music)
+        e_music = karbi.lookup("lūchè")
+        self.assertIsNotNone(e_music)
+        trans_music = karbi.translate("music", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "lūchè" for m in trans_music))
+
+        # kebàng (assembly, council)
+        e_council = karbi.lookup("kebàng")
+        self.assertIsNotNone(e_council)
+        trans_council = karbi.translate("assembly", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "kebàng" for m in trans_council))
+
+        # 2. Stack & Lyall (1908) entries:
+        # hako (once upon a time)
+        e_hako = karbi.lookup("hako")
+        self.assertIsNotNone(e_hako)
+        self.assertEqual(e_hako.senses[0]["part_of_speech"], "adverb")
+        self.assertIn("The Mikirs", e_hako.source_citation)
+        trans_hako = karbi.translate("long ago", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "hako" for m in trans_hako))
+
+        # vo-thung (wood-pigeon)
+        e_pigeon = karbi.lookup("vo-thung")
+        self.assertIsNotNone(e_pigeon)
+        trans_pigeon = karbi.translate("wood-pigeon", from_lang="en")
+        self.assertTrue(any(m.karbi_lemma == "vo-thung" for m in trans_pigeon))
+
+        # hotòn (carrying basket)
+        e_basket = karbi.lookup("hotòn")
+        self.assertIsNotNone(e_basket)
+        v_basket = karbi.lookup("hoton")
+        self.assertIsNotNone(v_basket)
+        self.assertEqual(v_basket.lemma, "hotòn")
+
+        # 3. Multilingual Indic translations & unverified filtering integrity
+        # In unverified mode (verified_only=False), Indic glosses are retrievable
+        hi_famine = karbi.translate("अकाल", from_lang="hi", verified_only=False)
+        self.assertTrue(any(m.karbi_lemma == "kànghi" for m in hi_famine))
+
+        as_famine = karbi.translate("আকাল", from_lang="as", verified_only=False)
+        self.assertTrue(any(m.karbi_lemma == "kànghi" for m in as_famine))
+
+        bn_rooster = karbi.translate("মোরগ", from_lang="bn", verified_only=False)
+        self.assertTrue(any(m.karbi_lemma == "vo-alo" for m in bn_rooster))
+
+        # In strict verified-only mode, unverified Indic glosses MUST NOT be presented as verified
+        hi_famine_verified = karbi.translate("अकाल", from_lang="hi", verified_only=True)
+        self.assertEqual(len(hi_famine_verified), 0, "Unverified Indic gloss must not pass verified_only filter")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -572,6 +572,63 @@ class TestValidationSystem(unittest.TestCase):
             f"Expected fail-closed error to be preserved, got: {errors_no_reg}",
         )
 
+    def test_unsupported_language_code_rejected(self):
+        """Definitions with unsupported language codes produce validation errors."""
+        validator = LexiconValidator(sources_registry={self.source_fixture.source_id: self.source_fixture})
+        entry = get_fictional_entry_fixture(entry_id="KB-TEST-0000091")
+        entry.senses[0].definitions["unsupported_xyz"] = ["test meaning"]
+        errors = validator.validate_entry(entry)
+        self.assertTrue(
+            any("unsupported language code 'unsupported_xyz'" in e for e in errors),
+            f"Expected unsupported language error, got: {errors}",
+        )
+
+    def test_contradictory_verified_gloss_on_unvetted_entry(self):
+        """Unvetted entries (DRAFT/AI_CANDIDATE) claiming verified: True in glosses produce validation errors."""
+        validator = LexiconValidator(sources_registry={self.source_fixture.source_id: self.source_fixture})
+        entry = get_fictional_entry_fixture(entry_id="KB-TEST-0000092", status=Status.DRAFT.value)
+        entry.senses[0].definitions["hi"] = [{"text": "परीक्षण", "verified": True}]
+        errors = validator.validate_entry(entry)
+        self.assertTrue(
+            any("contradictory verification state" in e for e in errors),
+            f"Expected contradictory verification error, got: {errors}",
+        )
+
+    def test_evidence_record_missing_locator_rejected(self):
+        """Evidence records missing a locator (page/timestamp) produce validation errors."""
+        validator = LexiconValidator(sources_registry={self.source_fixture.source_id: self.source_fixture})
+        entry = get_fictional_entry_fixture(entry_id="KB-TEST-0000093")
+        entry.provenance.evidence_records[0].locator = "   "
+        errors = validator.validate_entry(entry)
+        self.assertTrue(
+            any("must provide a locator" in e for e in errors),
+            f"Expected missing locator error, got: {errors}",
+        )
+
+    def test_source_attested_missing_evidence_records_rejected(self):
+        """SOURCE_ATTESTED entries with 0 evidence records produce validation errors."""
+        validator = LexiconValidator(sources_registry={self.source_fixture.source_id: self.source_fixture})
+        entry = get_fictional_entry_fixture(entry_id="KB-TEST-0000094", status=Status.SOURCE_ATTESTED.value)
+        entry.provenance.evidence_records = []
+        errors = validator.validate_entry(entry)
+        self.assertTrue(
+            any("marked as SOURCE_ATTESTED but has 0 evidence records" in e for e in errors),
+            f"Expected SOURCE_ATTESTED missing evidence records error, got: {errors}",
+        )
+
+    def test_lemma_nfc_normalization_enforced(self):
+        """Headword lemmas that are not in Unicode NFC form produce validation errors."""
+        import unicodedata
+        validator = LexiconValidator(sources_registry={self.source_fixture.source_id: self.source_fixture})
+        entry = get_fictional_entry_fixture(entry_id="KB-TEST-0000095")
+        # Decomposed NFD form of 'arlèng'
+        entry.headword.lemma = unicodedata.normalize("NFD", "arlèng")
+        errors = validator.validate_entry(entry)
+        self.assertTrue(
+            any("Unicode NFC normalized form" in e for e in errors),
+            f"Expected NFC normalization error, got: {errors}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

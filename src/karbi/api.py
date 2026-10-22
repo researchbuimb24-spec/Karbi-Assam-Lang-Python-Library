@@ -19,14 +19,13 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 import unicodedata
 
 from karbi.core.dataset import DatasetValidationResult, validate_dataset_files
-from karbi.core.db import DEFAULT_DB_PATH, get_db_connection
+from karbi.core.db import DEFAULT_DB_PATH, ensure_database_ready, get_db_connection
 from karbi.core.resources import get_resource_paths
 from karbi.dictionary import DictionaryEntry, batch_lookup, lookup, lookup_all
 from karbi.translator import (
     SUPPORTED_LANGUAGES,
     TranslationMatch,
     batch_translate,
-    ensure_database_ready,
     get_supported_languages,
     translate,
 )
@@ -350,8 +349,10 @@ def validate_dataset(
 
 __all__ = [
     "SearchResult",
+    "DatasetValidationResult",
     "search",
     "batch_search",
     "batch_lookup",
     "batch_translate",
+    "validate_dataset",
 ]

@@ -20,7 +20,7 @@ CULTURAL_RECORDS = {
                 "and to pray for bumper crops."
             ),
             "sensitivity": "public_cultural_heritage",
-            "source_citation": "Stack & Lyall (1908), 'The Mikirs', Section IV: Religion, pp. 31-34.",
+            "source_citation": "Stack & Lyall (1908), 'The Mikirs', Section IV: Religion, pp. 31-34 (historically recorded as 'Ròngker').",
         },
         {
             "id": "CULT-RIT-002",
@@ -28,11 +28,15 @@ CULTURAL_RECORDS = {
             "category": "sacred_mortuary_ceremony",
             "description": (
                 "The great post-funeral ceremony of the Karbis, performed to give rest to the souls "
-                "of the dead and escort them safely to Chom-arong (the ancestral spirit village). "
-                "Characterized by traditional laments (Charhe Ke-alun) sung by the female master of mourning (Uchepi)."
+                "of the dead and escort them safely to Chom-arong / Jòm-aròng (the ancestral spirit village). "
+                "Characterized by traditional laments (Charhe Ke-alun / kacharhe) sung by the female master of mourning (Uchepi)."
             ),
             "sensitivity": "culturally_sensitive_sacred_mortuary",
-            "source_citation": "Stack & Lyall (1908), 'The Mikirs', Section IV: Funeral Ceremonies, pp. 37-43.",
+            "source_citation": (
+                "Documented as traditional mortuary rituals in Stack & Lyall (1908), Section IV: Funeral Ceremonies, "
+                "pp. 37-43 (recording the journey to Jòm-aròng and chants by the uchepi); contemporary ethnographic "
+                "scholarship designates the comprehensive ceremony as Chomangkan / Thi-Karhi."
+            ),
         },
     ],
     "deities": [
@@ -42,18 +46,21 @@ CULTURAL_RECORDS = {
             "title": "Household and Clan Guardian Deity",
             "description": (
                 "Regarded in traditional Karbi belief as the great ancestral master, owner of human beings, "
-                "and foremost household guardian deity."
+                "and foremost household guardian deity (historically recorded as Hèmphu)."
             ),
             "sensitivity": "traditional_pantheon",
-            "source_citation": "Stack & Lyall (1908), 'The Mikirs', Section IV: Gods, p. 32.",
+            "source_citation": "Stack & Lyall (1908), 'The Mikirs', Section IV: Religion--Divinities, p. 32.",
         },
         {
             "id": "CULT-DEI-002",
             "name": "Mukrang",
             "title": "Guardian Deity",
-            "description": "Sibling deity alongside Hemphu, invoked in traditional household and village rites.",
+            "description": (
+                "Sibling deity alongside Hemphu, invoked in traditional household and village rites "
+                "(historically recorded as Mukràng)."
+            ),
             "sensitivity": "traditional_pantheon",
-            "source_citation": "Stack & Lyall (1908), 'The Mikirs', Section IV: Gods, p. 32.",
+            "source_citation": "Stack & Lyall (1908), 'The Mikirs', Section IV: Religion--Divinities, p. 32.",
         },
         {
             "id": "CULT-DEI-003",
@@ -61,7 +68,10 @@ CULTURAL_RECORDS = {
             "title": "Female Guardian Deity",
             "description": "Sister deity associated with Hemphu and Mukrang in the traditional triad of domestic protectors.",
             "sensitivity": "traditional_pantheon",
-            "source_citation": "Stack & Lyall (1908), 'The Mikirs', Section IV: Gods, p. 32.",
+            "source_citation": (
+                "Traditional Karbi belief and ethnographic record; not documented in Stack & Lyall (1908). "
+                "Awaiting formal citation to authoritative ethnographic literature or community elder review."
+            ),
         },
     ],
 }

@@ -62,10 +62,12 @@ def test_api_module_exports():
     assert hasattr(karbi.api, "__all__")
     expected_api_symbols = {
         "SearchResult",
+        "DatasetValidationResult",
         "search",
         "batch_search",
         "batch_lookup",
         "batch_translate",
+        "validate_dataset",
     }
     assert set(karbi.api.__all__) == expected_api_symbols
 

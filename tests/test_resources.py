@@ -152,13 +152,73 @@ def test_database_auto_recompiles_when_stale():
         ensure_database_ready(stale_db)
         assert stale_db.is_file()
 
-        # Artificially set database mtime to 1 hour in the past
-        past_time = stale_db.stat().st_mtime - 3600
+        # Artificially set database mtime to before the input data files
+        lex_files, src_files = get_resource_paths()
+        input_files = [f for f in lex_files + src_files if f.is_file()]
+        oldest_input = min(f.stat().st_mtime for f in input_files) if input_files else stale_db.stat().st_mtime
+        past_time = oldest_input - 3600
         os.utime(stale_db, (past_time, past_time))
-        assert stale_db.stat().st_mtime < stale_db.stat().st_ctime or stale_db.stat().st_mtime == past_time
+        assert stale_db.stat().st_mtime == past_time or stale_db.stat().st_mtime <= oldest_input
 
         # ensure_database_ready should detect that data files are newer than past_time and recompile
         res = ensure_database_ready(stale_db)
         assert res == stale_db
         # mtime should have been updated to current time
         assert stale_db.stat().st_mtime > past_time + 100
+
+
+def test_database_recompiles_when_table_missing():
+    """ensure_database_ready recompiles if a required relational table or index is missing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        incomplete_db = Path(tmpdir) / "incomplete.db"
+        ensure_database_ready(incomplete_db)
+        assert incomplete_db.is_file()
+
+        # Artificially drop translations_index
+        conn = get_db_connection(incomplete_db)
+        conn.execute("DROP TABLE translations_index")
+        conn.commit()
+        conn.close()
+
+        # ensure_database_ready must detect missing table and recompile
+        res = ensure_database_ready(incomplete_db)
+        assert res == incomplete_db
+
+        conn2 = get_db_connection(incomplete_db)
+        cur2 = conn2.cursor()
+        cur2.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='translations_index'")
+        assert cur2.fetchone() is not None
+        conn2.close()
+
+
+def test_spelling_variants_indexed_lookup():
+    """Looking up spelling variants (e.g. 'arleng', 'hem') utilizes indexed resolution."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_db = Path(tmpdir) / "variant_test.db"
+        ensure_database_ready(test_db)
+
+        # Confirm spelling_variants_index table is populated
+        conn = get_db_connection(test_db)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM spelling_variants_index")
+        variant_count = cur.fetchone()[0]
+        conn.close()
+        assert variant_count > 0
+
+        # Test lookup for spelling variant 'arleng'
+        res = karbi.lookup("arleng", db_path=test_db)
+        assert res is not None
+        assert res.lemma == "arlèng"
+
+        # Test lookup for spelling variant 'hem'
+        res_hem = karbi.lookup("hem", db_path=test_db)
+        assert res_hem is not None
+        assert res_hem.lemma == "hèm"
+
+
+def test_ensure_database_ready_exported_from_core_db():
+    """ensure_database_ready is accessible from karbi.core.db as well as karbi.translator."""
+    from karbi.core.db import ensure_database_ready as db_ready
+    from karbi.translator import ensure_database_ready as trans_ready
+
+    assert db_ready is trans_ready
