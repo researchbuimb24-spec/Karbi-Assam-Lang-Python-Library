@@ -72,6 +72,7 @@ class SearchResult:
     cultural_notes: Optional[str] = None
     entry_id: Optional[str] = None
     matched_language: Optional[str] = None
+    provenance: Optional[Dict[str, Any]] = None
     raw_entry: Optional[DictionaryEntry] = None
     raw_match: Optional[TranslationMatch] = None
 
@@ -98,6 +99,7 @@ class SearchResult:
             "cultural_notes": self.cultural_notes,
             "entry_id": self.entry_id,
             "matched_language": self.matched_language,
+            "provenance": self.provenance,
         }
 
 
@@ -131,7 +133,7 @@ def _entry_to_search_result(
             cultural_notes = s.get("cultural_metadata", {}).get("cultural_notes")
         examples.extend(s.get("examples", []))
 
-    is_verified = entry.status in ("SOURCE_ATTESTED", "VERIFIED")
+    is_verified = entry.status in ("SOURCE_ATTESTED", "VERIFIED", "CONFIRMED_FROM_SOURCE")
 
     return SearchResult(
         query=query,
@@ -150,6 +152,7 @@ def _entry_to_search_result(
         cultural_notes=cultural_notes,
         entry_id=entry.entry_id,
         matched_language="karbi",
+        provenance=entry.provenance,
         raw_entry=entry,
     )
 
@@ -233,7 +236,7 @@ def search(
         # 1. Explicit Karbi word lookup
         if lang_code == "karbi":
             for entry in lookup_all(clean_query, db_path=db_path, conn=conn):
-                if not verified_only or entry.status in ("SOURCE_ATTESTED", "VERIFIED"):
+                if not verified_only or entry.status in ("SOURCE_ATTESTED", "VERIFIED", "CONFIRMED_FROM_SOURCE"):
                     results.append(_entry_to_search_result(entry, clean_query, verified_only=verified_only))
             return results
 
@@ -248,7 +251,7 @@ def search(
         if lang_code == "auto":
             # Check Karbi dictionary first (if not searching verified-only or if entry is verified)
             for entry in lookup_all(clean_query, db_path=db_path, conn=conn):
-                if not verified_only or entry.status in ("SOURCE_ATTESTED", "VERIFIED"):
+                if not verified_only or entry.status in ("SOURCE_ATTESTED", "VERIFIED", "CONFIRMED_FROM_SOURCE"):
                     res = _entry_to_search_result(entry, clean_query, verified_only=verified_only)
                     results.append(res)
                     seen_lemmas.add(entry.lemma.lower())
@@ -279,23 +282,38 @@ def batch_search(
     lang: str = "auto",
     verified_only: bool = False,
     db_path: Optional[Union[str, Path]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> Dict[str, List[SearchResult]]:
     """
-    Performs unified search for multiple queries in batch.
+    Performs unified search for multiple queries in batch, reusing a single database connection.
 
     Args:
         queries: Iterable of words or phrases to search.
         lang: Language of the query: 'auto', 'karbi', 'en', 'hi', 'as', 'bn'.
         verified_only: If True, only returns verified entries and glosses.
         db_path: Optional custom path to SQLite database.
+        conn: Optional active sqlite3.Connection to reuse.
 
     Returns:
         Dictionary mapping each query string to its list of SearchResult objects.
     """
-    return {
-        q: search(q, lang=lang, verified_only=verified_only, db_path=db_path)
-        for q in queries
-    }
+    should_close = False
+    if conn is None:
+        target_db = ensure_database_ready(db_path)
+        conn = get_db_connection(target_db)
+        should_close = True
+
+    try:
+        return {
+            q: search(q, lang=lang, verified_only=verified_only, db_path=db_path, conn=conn)
+            for q in queries
+        }
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def validate_dataset(

@@ -24,6 +24,12 @@ class Status(str, Enum):
     SOURCE_ATTESTED = "SOURCE_ATTESTED"
     PEER_REVIEWED = "PEER_REVIEWED"
     VERIFIED = "VERIFIED"
+    # Extended verification and historical source audit statuses
+    CONFIRMED_FROM_SOURCE = "CONFIRMED_FROM_SOURCE"
+    PARTIALLY_CONFIRMED = "PARTIALLY_CONFIRMED"
+    CITATION_MISMATCH = "CITATION_MISMATCH"
+    NOT_VERIFIABLE = "NOT_VERIFIABLE"
+    REQUIRES_SPEAKER_REVIEW = "REQUIRES_SPEAKER_REVIEW"
 
 
 class AccessLevel(str, Enum):
@@ -155,12 +161,67 @@ class ReviewAuditRecord:
     audit_notes: str
 
 
+class GlossReviewDecision(str, Enum):
+    """Lifecycle decisions for individual translation gloss reviews."""
+    AWAITING_REVIEW = "awaiting_review"
+    ACCEPTED = "accepted"
+    CORRECTED = "corrected"
+    REJECTED = "rejected"
+
+
+@dataclass
+class GlossReviewRecord:
+    """Audit and verification record for an individual translation gloss."""
+    original_gloss: str
+    language: str
+    decision: str = GlossReviewDecision.AWAITING_REVIEW.value
+    supporting_source_id: Optional[str] = None
+    supporting_locator: Optional[str] = None
+    reviewer_id: Optional[str] = None
+    reviewer_role: Optional[str] = None
+    review_date: Optional[str] = None
+    reason: Optional[str] = None
+    revision_history: List[Dict[str, Any]] = field(default_factory=list)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Serializes the gloss review record to a dictionary."""
+        return {
+            "original_gloss": self.original_gloss,
+            "language": self.language,
+            "decision": self.decision,
+            "supporting_source_id": self.supporting_source_id,
+            "supporting_locator": self.supporting_locator,
+            "reviewer_id": self.reviewer_id,
+            "reviewer_role": self.reviewer_role,
+            "review_date": self.review_date,
+            "reason": self.reason,
+            "revision_history": self.revision_history,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> GlossReviewRecord:
+        """Constructs a GlossReviewRecord from a dictionary."""
+        return cls(
+            original_gloss=data.get("original_gloss", ""),
+            language=data.get("language", ""),
+            decision=data.get("decision", GlossReviewDecision.AWAITING_REVIEW.value),
+            supporting_source_id=data.get("supporting_source_id"),
+            supporting_locator=data.get("supporting_locator"),
+            reviewer_id=data.get("reviewer_id"),
+            reviewer_role=data.get("reviewer_role"),
+            review_date=data.get("review_date"),
+            reason=data.get("reason"),
+            revision_history=data.get("revision_history", []),
+        )
+
+
 @dataclass
 class Provenance:
     """Comprehensive audit and provenance history of an entry."""
     evidence_records: List[EvidenceRecord] = field(default_factory=list)
     contributors: List[ContributorRecord] = field(default_factory=list)
     reviews: List[ReviewAuditRecord] = field(default_factory=list)
+    gloss_reviews: List[GlossReviewRecord] = field(default_factory=list)
 
 
 @dataclass

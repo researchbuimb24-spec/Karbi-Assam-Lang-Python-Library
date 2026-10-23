@@ -42,7 +42,13 @@ class TestAlphabetAndGrammar(unittest.TestCase):
         self.assertIn("th", aspirates)
 
     def test_numerical_classifiers(self):
-        """Classifier expressions correctly follow documented linguistic rules."""
+        """Classifier expressions correctly follow documented linguistic rules for all 7 documented forms."""
+        classifiers = karbi.get_classifiers()
+        expected_classifiers = {"bang": "bàng", "jon": "jòn", "rong": "ròng", "hum": "hum", "pak": "pàk", "pum": "pum", "hong": "hòng"}
+        for key, expected_form in expected_classifiers.items():
+            self.assertIn(key, classifiers)
+            self.assertEqual(classifiers[key]["classifier"], expected_form)
+
         # 4 buffaloes -> jòn-phili
         self.assertEqual(karbi.count_with_classifier(4, "animals"), "jòn-phili")
 
@@ -58,6 +64,15 @@ class TestAlphabetAndGrammar(unittest.TestCase):
         # 1 tree -> e-ròng
         self.assertEqual(karbi.count_with_classifier(1, "trees"), "e-ròng")
 
+        # 2 eggs -> pum-ni (round objects)
+        self.assertEqual(karbi.count_with_classifier(2, "round"), "pum-ni")
+
+        # 1 book/flat item -> e-pàk
+        self.assertEqual(karbi.count_with_classifier(1, "flat"), "e-pàk")
+
+        # 2 bracelets/limbs -> hòng-ni
+        self.assertEqual(karbi.count_with_classifier(2, "ornaments"), "hòng-ni")
+
         # None and out of range edge cases
         self.assertIsNone(karbi.count_with_classifier(None, "animals"))
         self.assertIsNone(karbi.count_with_classifier(1, None))
@@ -66,7 +81,7 @@ class TestAlphabetAndGrammar(unittest.TestCase):
         self.assertIsNone(karbi.count_with_classifier(1, "unknown_category_xyz"))
 
     def test_cardinals_and_pronouns(self):
-        """Cardinals and pronouns match historical documentation."""
+        """Cardinals and pronouns match historical documentation, preserving inclusive/exclusive distinction."""
         cardinals = karbi.get_cardinals()
         self.assertEqual(cardinals[1], "isi")
         self.assertEqual(cardinals[2], "hini")
@@ -79,8 +94,14 @@ class TestAlphabetAndGrammar(unittest.TestCase):
         self.assertEqual(pronouns["second_person_singular"]["karbi"], "nàng")
         self.assertEqual(pronouns["third_person_singular"]["karbi"], "la")
 
+        # Preserved inclusive vs exclusive grammatical distinction
+        self.assertEqual(pronouns["first_person_plural_exclusive"]["karbi"], "ne-tum")
+        self.assertEqual(pronouns["first_person_plural_inclusive"]["karbi"], "i-tum")
+        self.assertEqual(pronouns["second_person_plural"]["karbi"], "nàng-tum")
+        self.assertEqual(pronouns["third_person_plural"]["karbi"], "la-tum")
+
     def test_cultural_records(self):
-        """Cultural records contain exact citations and sensitivity markers."""
+        """Cultural records contain exact citations, sensitivity markers, and caution on unverified sources."""
         rituals = karbi.get_rituals()
         self.assertGreaterEqual(len(rituals), 2)
         rongker = next(r for r in rituals if r["name"] == "Rongker")
@@ -91,8 +112,21 @@ class TestAlphabetAndGrammar(unittest.TestCase):
 
         deities = karbi.get_deities()
         self.assertGreaterEqual(len(deities), 3)
+        deity_names = {d["name"] for d in deities}
+        self.assertIn("Hemphu", deity_names)
+        self.assertIn("Mukrang", deity_names)
+        self.assertIn("Rasinja", deity_names)
+
         hemphu = next(d for d in deities if d["name"] == "Hemphu")
         self.assertEqual(hemphu["title"], "Household and Clan Guardian Deity")
+
+        mukrang = next(d for d in deities if d["name"] == "Mukrang")
+        self.assertEqual(mukrang["title"], "Guardian Deity")
+
+        # Rasinja is preserved with explicit caution pending authoritative elder/ethnographic review
+        rasinja = next(d for d in deities if d["name"] == "Rasinja")
+        self.assertEqual(rasinja["title"], "Female Guardian Deity")
+        self.assertIn("Awaiting formal citation", rasinja["source_citation"])
 
     def test_alphabet_type_hints(self):
         """Type annotations in alphabet module evaluate without NameError."""

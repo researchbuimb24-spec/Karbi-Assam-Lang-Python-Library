@@ -46,6 +46,7 @@ SUPPORTED_LANGUAGES = {
     "as": {"name": "Assamese", "script": "Bengali-Assamese", "status": "active_data"},
     "bn": {"name": "Bengali", "script": "Bengali", "status": "active_data"},
     "mr": {"name": "Marathi", "script": "Devanagari", "status": "awaiting_sourced_entries"},
+    "kha": {"name": "Khasi", "script": "Latin", "status": "awaiting_sourced_entries"},
 }
 
 
@@ -58,7 +59,7 @@ class TranslationMatch:
     part_of_speech: str
     matched_meaning: str
     all_definitions: Dict[str, Any]
-    status: str                            # Status of matched gloss: 'source_attested', 'verified', 'unverified'
+    status: str                            # Status of matched gloss: 'source_attested', 'verified', 'unverified', etc.
     entry_status: str = "DRAFT"            # Underlying entry-level lifecycle status
     is_verified: bool = False              # Boolean flag: False for unverified glosses
     phonetics_ipa: Optional[str] = None
@@ -100,12 +101,15 @@ def _determine_gloss_verification(
     Determines whether a matched translation gloss is verified or unverified.
 
     Checks per-gloss verification flags and sense-level gloss provenance to prevent
-    unverified Indic glosses from inheriting parent entry status.
+    unverified Indic glosses or mismatched citation records from inheriting parent entry status.
     """
     gloss_prov_map = sense.get("gloss_provenance") or {}
     lang_prov = str(gloss_prov_map.get(lang_code, "")).lower()
 
-    if lang_prov in ("unverified", "draft", "ai_candidate"):
+    if entry_status in ("CITATION_MISMATCH", "NOT_VERIFIABLE", "REQUIRES_SPEAKER_REVIEW", "DRAFT", "AI_CANDIDATE"):
+        return False, entry_status.lower()
+
+    if lang_prov in ("unverified", "draft", "ai_candidate", "citation_mismatch"):
         return False, "unverified"
 
     defs = sense.get("definitions", {}).get(lang_code, [])
@@ -119,13 +123,13 @@ def _determine_gloss_verification(
                 if item.get("verified") is True:
                     return True, "verified"
         elif isinstance(item, str) and item.strip().lower() == q_lower:
-            if lang_prov in ("source_attested", "verified", "peer_reviewed"):
+            if lang_prov in ("source_attested", "verified", "peer_reviewed", "confirmed_from_source"):
                 return True, lang_prov
 
-    if lang_prov in ("source_attested", "verified", "peer_reviewed"):
+    if lang_prov in ("source_attested", "verified", "peer_reviewed", "confirmed_from_source"):
         return True, lang_prov
 
-    if entry_status == "VERIFIED" and lang_prov != "unverified":
+    if entry_status in ("VERIFIED", "CONFIRMED_FROM_SOURCE") and lang_prov != "unverified":
         return True, "verified"
 
     return False, "unverified"

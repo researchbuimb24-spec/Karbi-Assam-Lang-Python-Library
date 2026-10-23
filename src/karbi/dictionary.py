@@ -186,23 +186,26 @@ def lookup_all(
 
         # 2. Check FTS5 for lemma variants if no exact match
         if not entries:
-            safe_word = word.replace('"', '""')
-            cur.execute(
-                """
-                SELECT e.raw_json
-                FROM fts_lexicon f
-                JOIN lexicon_entries e ON f.entry_id = e.entry_id
-                WHERE f.lemma MATCH ?
-                LIMIT 10
-                """,
-                (f'"{safe_word}"',),
-            )
-            for row in cur.fetchall():
-                raw = json.loads(row["raw_json"])
-                eid = raw.get("id", "")
-                if eid not in seen_ids:
-                    seen_ids.add(eid)
-                    entries.append(_raw_to_entry(raw, cur))
+            try:
+                safe_word = word.replace('"', '""')
+                cur.execute(
+                    """
+                    SELECT e.raw_json
+                    FROM fts_lexicon f
+                    JOIN lexicon_entries e ON f.entry_id = e.entry_id
+                    WHERE f.lemma MATCH ?
+                    LIMIT 10
+                    """,
+                    (f'"{safe_word}"',),
+                )
+                for row in cur.fetchall():
+                    raw = json.loads(row["raw_json"])
+                    eid = raw.get("id", "")
+                    if eid not in seen_ids:
+                        seen_ids.add(eid)
+                        entries.append(_raw_to_entry(raw, cur))
+            except (sqlite3.OperationalError, sqlite3.DatabaseError):
+                pass
 
         # 3. Check spelling variants using indexed table first
         if not entries:

@@ -205,7 +205,7 @@ class TestPublicPythonAPI:
         result = validate_dataset()
         assert isinstance(result, DatasetValidationResult)
         assert result.is_valid is True
-        assert result.lexicon_entries_count == 481
+        assert result.lexicon_entries_count == 516
         assert result.sources_count == 4
         assert len(result.errors) == 0
 

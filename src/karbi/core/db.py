@@ -168,18 +168,21 @@ def init_db_schema(conn: sqlite3.Connection) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_variant_entry ON spelling_variants_index(entry_id);")
 
     # 6. Full-Text Search (FTS5) Virtual Table
-    cur.execute("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS fts_lexicon USING fts5(
-            entry_id UNINDEXED,
-            lemma,
-            def_en,
-            def_hi,
-            def_as,
-            def_bn,
-            text_karbi,
-            tokenize = 'unicode61 remove_diacritics 0'
-        );
-    """)
+    try:
+        cur.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS fts_lexicon USING fts5(
+                entry_id UNINDEXED,
+                lemma,
+                def_en,
+                def_hi,
+                def_as,
+                def_bn,
+                text_karbi,
+                tokenize = 'unicode61 remove_diacritics 0'
+            );
+        """)
+    except sqlite3.OperationalError:
+        pass  # FTS5 not compiled or disabled; database continues with relational indices
 
     conn.commit()
 
@@ -334,14 +337,17 @@ def compile_database(
 
                 # Insert into FTS5 Index (only if allowed and not culturally confidential)
                 if allow_idx and not is_sens:
-                    ex_karbi_text = " ".join([ex.get("text_karbi", "") for ex in s.get("examples", [])])
-                    cur.execute(
-                        """
-                        INSERT INTO fts_lexicon (entry_id, lemma, def_en, def_hi, def_as, def_bn, text_karbi)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (eid, lemma, def_en_str, def_hi_str, def_as_str, def_bn_str, ex_karbi_text),
-                    )
+                    try:
+                        ex_karbi_text = " ".join([ex.get("text_karbi", "") for ex in s.get("examples", [])])
+                        cur.execute(
+                            """
+                            INSERT INTO fts_lexicon (entry_id, lemma, def_en, def_hi, def_as, def_bn, text_karbi)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (eid, lemma, def_en_str, def_hi_str, def_as_str, def_bn_str, ex_karbi_text),
+                        )
+                    except sqlite3.OperationalError:
+                        pass
 
     conn.commit()
     conn.close()

@@ -21,6 +21,8 @@ from karbi.core.models import (
     DialectMetadata,
     EvidenceRecord,
     Example,
+    GlossReviewDecision,
+    GlossReviewRecord,
     Headword,
     LexiconEntry,
     OrthographyMetadata,
@@ -49,6 +51,7 @@ RE_ENTRY_ID_TEST = re.compile(r"^KB-TEST-[0-9A-Za-z_-]+$")
 RE_SOURCE_ID = re.compile(r"^SRC-(PUB|FLD|ARC|OTH)-[0-9A-Za-z_-]+$")
 RE_EXAMPLE_ID = re.compile(r"^EX-[0-9A-Za-z_-]+$")
 RE_REVIEW_ID = re.compile(r"^REV-[0-9A-Za-z_-]+$")
+RE_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$")
 
 # Mandatory verification review scopes
 MANDATORY_SCOPES_PATHWAY_A = {"headword_orthography", "definitions_en", "source_locator_match"}
@@ -197,10 +200,15 @@ class LexiconValidator:
                     )
 
         # 8. Provenance Evidence Records Validation (across all statuses)
-        if e.status == Status.SOURCE_ATTESTED.value:
+        if e.status in (
+            Status.SOURCE_ATTESTED.value,
+            Status.CONFIRMED_FROM_SOURCE.value,
+            Status.PARTIALLY_CONFIRMED.value,
+            Status.CITATION_MISMATCH.value,
+        ):
             if not e.provenance or not e.provenance.evidence_records or len(e.provenance.evidence_records) == 0:
                 errors.append(
-                    f"Entry '{e.id}': marked as SOURCE_ATTESTED but has 0 evidence records."
+                    f"Entry '{e.id}': marked as {e.status} but has 0 evidence records."
                 )
 
         if e.provenance and e.provenance.evidence_records:
@@ -223,6 +231,70 @@ class LexiconValidator:
                 if ve not in errors:
                     errors.append(ve)
 
+        # 10. Gloss Review Records Validation
+        if e.provenance and e.provenance.gloss_reviews:
+            gloss_review_errors = self._validate_gloss_reviews(e.id, e.provenance.gloss_reviews)
+            errors.extend(gloss_review_errors)
+
+        return errors
+
+    def _validate_gloss_reviews(self, entry_id: str, reviews: List[GlossReviewRecord]) -> List[str]:
+        """Validate individual gloss review records for schema, decisions, dates, and referential integrity."""
+        errors: List[str] = []
+        allowed_decisions = {d.value for d in GlossReviewDecision}
+        for idx, gr in enumerate(reviews, start=1):
+            if gr.decision not in allowed_decisions:
+                errors.append(
+                    f"Entry '{entry_id}', GlossReview #{idx}: invalid decision '{gr.decision}'. "
+                    f"Allowed: {sorted(list(allowed_decisions))}"
+                )
+            if not gr.language or gr.language not in SUPPORTED_DEFINITION_LANGUAGES:
+                errors.append(
+                    f"Entry '{entry_id}', GlossReview #{idx}: invalid or unsupported language code '{gr.language}'. "
+                    f"Allowed: {sorted(list(SUPPORTED_DEFINITION_LANGUAGES))}"
+                )
+            if not gr.original_gloss or not gr.original_gloss.strip():
+                errors.append(
+                    f"Entry '{entry_id}', GlossReview #{idx}: original_gloss cannot be empty."
+                )
+            if gr.supporting_source_id:
+                if self.sources_registry and gr.supporting_source_id not in self.sources_registry:
+                    errors.append(
+                        f"Entry '{entry_id}', GlossReview #{idx}: references unregistered supporting_source_id '{gr.supporting_source_id}'."
+                    )
+                if not gr.supporting_locator or not str(gr.supporting_locator).strip():
+                    errors.append(
+                        f"Entry '{entry_id}', GlossReview #{idx}: supporting source '{gr.supporting_source_id}' requires a locator."
+                    )
+            if gr.decision == GlossReviewDecision.ACCEPTED.value:
+                if not gr.reviewer_id or not gr.reviewer_id.strip():
+                    errors.append(
+                        f"Entry '{entry_id}', GlossReview #{idx}: accepted review requires reviewer_id."
+                    )
+                if not gr.reviewer_role or not gr.reviewer_role.strip():
+                    errors.append(
+                        f"Entry '{entry_id}', GlossReview #{idx}: accepted review requires reviewer_role."
+                    )
+            if gr.decision == GlossReviewDecision.REJECTED.value and (not gr.reason or not gr.reason.strip()):
+                errors.append(
+                    f"Entry '{entry_id}', GlossReview #{idx}: rejected review must state a reason."
+                )
+            if gr.review_date:
+                if not RE_ISO_DATE.match(gr.review_date):
+                    errors.append(
+                        f"Entry '{entry_id}', GlossReview #{idx}: invalid review_date format '{gr.review_date}'. Must be ISO-8601 (YYYY-MM-DD)."
+                    )
+                else:
+                    try:
+                        year = int(gr.review_date.split("-")[0])
+                        if year < 1800 or year > 2026:
+                            errors.append(
+                                f"Entry '{entry_id}', GlossReview #{idx}: review_date year {year} is out of valid range (1800-2026)."
+                            )
+                    except ValueError:
+                        errors.append(
+                            f"Entry '{entry_id}', GlossReview #{idx}: malformed review_date '{gr.review_date}'."
+                        )
         return errors
 
     def _validate_sense(self, entry_id: str, index: int, sense: Sense, parent_status: str) -> List[str]:
@@ -487,10 +559,26 @@ class LexiconValidator:
             )
             for rev in prov_data.get("reviews", [])
         ]
+        gloss_reviews = [
+            GlossReviewRecord(
+                original_gloss=gr.get("original_gloss", ""),
+                language=gr.get("language", ""),
+                decision=gr.get("decision", "awaiting_review"),
+                supporting_source_id=gr.get("supporting_source_id"),
+                supporting_locator=gr.get("supporting_locator"),
+                reviewer_id=gr.get("reviewer_id"),
+                reviewer_role=gr.get("reviewer_role"),
+                review_date=gr.get("review_date"),
+                reason=gr.get("reason"),
+                revision_history=gr.get("revision_history", []),
+            )
+            for gr in prov_data.get("gloss_reviews", [])
+        ]
         provenance = Provenance(
             evidence_records=evidence_records,
             contributors=prov_data.get("contributors", []),
             reviews=reviews,
+            gloss_reviews=gloss_reviews,
         )
 
         variants = [

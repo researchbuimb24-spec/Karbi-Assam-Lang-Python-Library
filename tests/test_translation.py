@@ -529,6 +529,190 @@ class TestMultilingualTranslation(unittest.TestCase):
         hi_famine_verified = karbi.translate("अकाल", from_lang="hi", verified_only=True)
         self.assertEqual(len(hi_famine_verified), 0, "Unverified Indic gloss must not pass verified_only filter")
 
+    def test_citation_mismatch_audit_and_verification_filtering(self):
+        """KB-LEX-0000382 (kāthē) is recorded with CITATION_MISMATCH and excluded from verified_only results."""
+        entry = karbi.lookup("kāthē")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.entry_id, "KB-LEX-0000382")
+        self.assertEqual(entry.status, "CITATION_MISMATCH")
+
+        # Provenance audit review record exists
+        reviews = entry.provenance.get("reviews", [])
+        self.assertGreaterEqual(len(reviews), 1)
+        self.assertEqual(reviews[0]["review_id"], "REV-AUDIT-0000382-01")
+        self.assertEqual(reviews[0]["verification_finding"], "needs_revision")
+        self.assertIn("CITATION_MISMATCH", reviews[0]["audit_notes"])
+
+        # When searching with verified_only=True, unverified/mismatched entry is excluded
+        ver_search = karbi.search("kāthē", lang="karbi", verified_only=True)
+        self.assertEqual(ver_search, [])
+
+        # When searching with verified_only=False, entry is returned with honest flags
+        unver_search = karbi.search("kāthē", lang="karbi", verified_only=False)
+        self.assertEqual(len(unver_search), 1)
+        res = unver_search[0]
+        self.assertFalse(res.is_verified)
+        self.assertEqual(res.status, "CITATION_MISMATCH")
+        self.assertIsNotNone(res.provenance)
+        self.assertIn("reviews", res.provenance)
+
+        # Translation for 'squirrel' with verified_only=True returns authentic 'karle' and excludes mismatched 'kāthē'
+        squirrel_ver = karbi.translate("squirrel", from_lang="en", verified_only=True)
+        self.assertEqual([m.karbi_lemma for m in squirrel_ver], ["karle"])
+        self.assertFalse(any(m.karbi_lemma == "kāthē" for m in squirrel_ver))
+
+        # Translation without verified_only includes kāthē but flagged as unverified / citation mismatch
+        squirrel_all = karbi.translate("squirrel", from_lang="en", verified_only=False)
+        self.assertTrue(any(m.karbi_lemma == "kāthē" and not m.is_verified for m in squirrel_all))
+
+    def test_batch_search_and_provenance(self):
+        """batch_search returns structured results for multiple queries and provides provenance."""
+        queries = ["arlèng", "hèm", "làng"]
+        batch_res = karbi.batch_search(queries, lang="auto")
+        self.assertEqual(len(batch_res), 3)
+        for q in queries:
+            self.assertIn(q, batch_res)
+            self.assertGreaterEqual(len(batch_res[q]), 1)
+            self.assertIsNotNone(batch_res[q][0].provenance)
+
+    def test_supported_languages_extensibility(self):
+        """Supported languages registry includes Khasi and Marathi marked as awaiting sourced entries."""
+        langs = karbi.get_supported_languages()
+        self.assertIn("kha", langs)
+        self.assertEqual(langs["kha"]["status"], "awaiting_sourced_entries")
+        self.assertEqual(langs["kha"]["name"], "Khasi")
+        self.assertIn("mr", langs)
+        self.assertEqual(langs["mr"]["status"], "awaiting_sourced_entries")
+
+    def test_canonical_and_packaged_data_byte_parity(self):
+        """Authoritative repository data and packaged resources match byte-for-byte."""
+        import filecmp
+        p_canon_lex = Path(__file__).resolve().parent.parent / "data" / "lexicon" / "core_lexicon.jsonl"
+        p_pkg_lex = Path(__file__).resolve().parent.parent / "src" / "karbi" / "resources" / "lexicon" / "core_lexicon.jsonl"
+        self.assertTrue(filecmp.cmp(str(p_canon_lex), str(p_pkg_lex), shallow=False))
+
+        p_canon_src = Path(__file__).resolve().parent.parent / "data" / "sources" / "sources.jsonl"
+        p_pkg_src = Path(__file__).resolve().parent.parent / "src" / "karbi" / "resources" / "sources" / "sources.jsonl"
+        self.assertTrue(filecmp.cmp(str(p_canon_src), str(p_pkg_src), shallow=False))
+
+
+    def test_multilingual_translation_for_expanded_entries(self):
+        """Expanded entries translate from English, Hindi, Assamese, and Bengali into Karbi."""
+        # 1. English -> Karbi (verified_only=True returns source-attested entries)
+        elephant_matches = karbi.translate("elephant", from_lang="en", verified_only=True)
+        self.assertEqual([m.karbi_lemma for m in elephant_matches], ["ingnar"])
+        self.assertTrue(elephant_matches[0].is_verified)
+
+        earthquake_matches = karbi.translate("earthquake", from_lang="en", verified_only=True)
+        self.assertEqual([m.karbi_lemma for m in earthquake_matches], ["chikli"])
+        self.assertTrue(earthquake_matches[0].is_verified)
+
+        # 2. Hindi -> Karbi: verified_only=True returns empty because Indic candidate glosses are unverified
+        self.assertEqual(karbi.translate("हाथी", from_lang="hi", verified_only=True), [])
+        # With verified_only=False, unverified candidate match is returned with honest badge
+        hi_matches = karbi.translate("हाथी", from_lang="hi", verified_only=False)
+        self.assertEqual([m.karbi_lemma for m in hi_matches], ["ingnar"])
+        self.assertFalse(hi_matches[0].is_verified)
+
+        # 3. Assamese -> Karbi: unverified candidate match
+        self.assertEqual(karbi.translate("হাতী", from_lang="as", verified_only=True), [])
+        as_matches = karbi.translate("হাতী", from_lang="as", verified_only=False)
+        self.assertEqual([m.karbi_lemma for m in as_matches], ["ingnar"])
+        self.assertFalse(as_matches[0].is_verified)
+
+        # 4. Bengali -> Karbi: unverified candidate match
+        self.assertEqual(karbi.translate("হাতি", from_lang="bn", verified_only=True), [])
+        bn_matches = karbi.translate("হাতি", from_lang="bn", verified_only=False)
+        self.assertEqual([m.karbi_lemma for m in bn_matches], ["ingnar"])
+        self.assertFalse(bn_matches[0].is_verified)
+
+    def test_gloss_review_workflow_data_model(self):
+        """GlossReviewRecord accurately tracks reviewer decisions, locators, and audit histories."""
+        from karbi.core.models import GlossReviewDecision, GlossReviewRecord, Provenance
+
+        rec = GlossReviewRecord(
+            original_gloss="हाथी",
+            language="hi",
+            decision=GlossReviewDecision.ACCEPTED.value,
+            supporting_source_id="SRC-PUB-00001",
+            supporting_locator="p. 88",
+            reviewer_id="REV-LING-TEST",
+            reviewer_role="linguist",
+            review_date="2026-10-23",
+            reason="Confirmed against primary source text and interlinear rendering",
+            revision_history=[{"action": "initial_submission", "status": "awaiting_review"}],
+        )
+        self.assertEqual(rec.decision, "accepted")
+        self.assertEqual(rec.reviewer_role, "linguist")
+
+        prov = Provenance(gloss_reviews=[rec])
+        self.assertEqual(len(prov.gloss_reviews), 1)
+        self.assertEqual(prov.gloss_reviews[0].original_gloss, "हाथी")
+
+        # Round-trip serialization
+        rec_dict = rec.as_dict()
+        self.assertEqual(rec_dict["decision"], "accepted")
+        self.assertEqual(rec_dict["supporting_locator"], "p. 88")
+
+        rec_deser = GlossReviewRecord.from_dict(rec_dict)
+        self.assertEqual(rec_deser.original_gloss, "हाथी")
+        self.assertEqual(rec_deser.decision, "accepted")
+
+    def test_gloss_review_validator_rejection_rules(self):
+        """Dataset validator rejects malformed gloss review records."""
+        from karbi.core.models import GlossReviewRecord
+        from karbi.core.validator import LexiconValidator
+
+        val = LexiconValidator(sources_registry={"SRC-PUB-00001": None})
+
+        # 1. Invalid decision
+        bad_dec = [GlossReviewRecord(original_gloss="हाथी", language="hi", decision="conjectured")]
+        errs = val._validate_gloss_reviews("KB-TEST-001", bad_dec)
+        self.assertTrue(any("invalid decision 'conjectured'" in e for e in errs))
+
+        # 2. Unsupported language
+        bad_lang = [GlossReviewRecord(original_gloss="test", language="xx", decision="awaiting_review")]
+        errs = val._validate_gloss_reviews("KB-TEST-001", bad_lang)
+        self.assertTrue(any("unsupported language code 'xx'" in e for e in errs))
+
+        # 3. Missing supporting locator when source is specified
+        missing_loc = [GlossReviewRecord(
+            original_gloss="हाथी", language="hi", decision="awaiting_review",
+            supporting_source_id="SRC-PUB-00001", supporting_locator="",
+        )]
+        errs = val._validate_gloss_reviews("KB-TEST-001", missing_loc)
+        self.assertTrue(any("requires a locator" in e for e in errs))
+
+        # 4. Accepted review missing reviewer_id and reviewer_role
+        unauth_acc = [GlossReviewRecord(
+            original_gloss="हाथी", language="hi", decision="accepted",
+            reviewer_id="", reviewer_role=""
+        )]
+        errs = val._validate_gloss_reviews("KB-TEST-001", unauth_acc)
+        self.assertTrue(any("requires reviewer_id" in e for e in errs))
+
+        # 5. Rejected review missing reason
+        unexp_rej = [GlossReviewRecord(
+            original_gloss="हाथी", language="hi", decision="rejected", reason=""
+        )]
+        errs = val._validate_gloss_reviews("KB-TEST-001", unexp_rej)
+        self.assertTrue(any("rejected review must state a reason" in e for e in errs))
+
+        # 6. Impossible future year
+        future_date = [GlossReviewRecord(
+            original_gloss="हाथी", language="hi", decision="awaiting_review",
+            review_date="2099-01-01"
+        )]
+        errs = val._validate_gloss_reviews("KB-TEST-001", future_date)
+        self.assertTrue(any("out of valid range" in e for e in errs))
+
+    def test_gloss_review_no_automatic_promotion_to_verified(self):
+        """Attaching a GlossReviewRecord to an unverified entry does NOT leak into verified_only=True."""
+        # Querying an unverified Hindi candidate term with verified_only=True remains empty
+        self.assertEqual(karbi.translate("हाथी", from_lang="hi", verified_only=True), [])
+        self.assertEqual(karbi.translate("হাতী", from_lang="as", verified_only=True), [])
+        self.assertEqual(karbi.translate("হাতি", from_lang="bn", verified_only=True), [])
+
 
 if __name__ == "__main__":
     unittest.main()

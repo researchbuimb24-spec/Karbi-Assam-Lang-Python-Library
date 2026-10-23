@@ -342,11 +342,11 @@ class TestCanonicalRepositoryDataset(unittest.TestCase):
         result = validate_dataset_files([lex_file], [src_file])
         self.assertTrue(result.is_valid, f"Dataset validation failed: {result.errors}")
         self.assertEqual(len(result.errors), 0)
-        self.assertEqual(result.lexicon_entries_count, 481)
+        self.assertEqual(result.lexicon_entries_count, 516)
         self.assertEqual(result.sources_count, 4)
 
     def test_canonical_entries_duplicate_prevention(self):
-        """All 481 entries have unique IDs in canonical dataset."""
+        """All 516 entries have unique IDs in canonical dataset."""
         repo_root = Path(__file__).resolve().parent.parent
         lex_file = repo_root / "data" / "lexicon" / "core_lexicon.jsonl"
 
@@ -360,7 +360,49 @@ class TestCanonicalRepositoryDataset(unittest.TestCase):
                 self.assertNotIn(eid, seen_ids, f"Duplicate entry ID detected: {eid}")
                 seen_ids.add(eid)
 
-        self.assertEqual(len(seen_ids), 481)
+        self.assertEqual(len(seen_ids), 516)
+
+    def test_expanded_lexicon_entries_integrity(self):
+        """Newly expanded entries (KB-LEX-0000482 to KB-LEX-0000516) have valid locators and unverified Indic glosses."""
+        repo_root = Path(__file__).resolve().parent.parent
+        lex_file = repo_root / "data" / "lexicon" / "core_lexicon.jsonl"
+
+        with open(lex_file, "r", encoding="utf-8") as f:
+            entries = [json.loads(line) for line in f if line.strip()]
+
+        expanded = [e for e in entries if int(e["id"].split("-")[-1]) >= 482]
+        self.assertEqual(len(expanded), 35)
+
+        for e in expanded:
+            self.assertEqual(e["status"], "SOURCE_ATTESTED")
+            self.assertGreaterEqual(len(e["provenance"]["evidence_records"]), 1)
+            ev = e["provenance"]["evidence_records"][0]
+            self.assertEqual(ev["source_id"], "SRC-PUB-00001")
+            self.assertTrue(ev["locator"].strip())
+
+            # Verify sense gloss provenance and unverified flags
+            for s in e["senses"]:
+                self.assertEqual(s["gloss_provenance"]["en"], "source_attested")
+                self.assertEqual(s["gloss_provenance"]["hi"], "unverified")
+                self.assertEqual(s["gloss_provenance"]["as"], "unverified")
+                self.assertEqual(s["gloss_provenance"]["bn"], "unverified")
+                for lang in ("hi", "as", "bn"):
+                    for g in s["definitions"][lang]:
+                        self.assertFalse(g["verified"])
+
+    def test_ingnar_and_chikli_presence(self):
+        """Authentic cultural and natural terms ingnar (elephant) and chikli (earthquake) exist."""
+        repo_root = Path(__file__).resolve().parent.parent
+        lex_file = repo_root / "data" / "lexicon" / "core_lexicon.jsonl"
+
+        with open(lex_file, "r", encoding="utf-8") as f:
+            entries = {json.loads(line)["headword"]["lemma"]: json.loads(line) for line in f if line.strip()}
+
+        self.assertIn("ingnar", entries)
+        self.assertEqual(entries["ingnar"]["senses"][0]["definitions"]["en"], ["elephant"])
+
+        self.assertIn("chikli", entries)
+        self.assertEqual(entries["chikli"]["senses"][0]["definitions"]["en"], ["earthquake"])
 
 
 if __name__ == "__main__":

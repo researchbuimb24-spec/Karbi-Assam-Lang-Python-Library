@@ -506,7 +506,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_trans = subparsers.add_parser("translate", help="Translate from English, Hindi, Assamese, or Bengali into Karbi.")
     p_trans.add_argument("query", help="Word or concept to translate into Karbi (e.g. 'water', 'घर', 'পানী')")
     p_trans.add_argument(
-        "--from", "-l", "--lang",
+        "--from", "-l", "--lang", "--from-lang",
         dest="from_lang",
         default="en",
         choices=["en", "hi", "as", "bn"],
